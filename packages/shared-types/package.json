@@ -1,0 +1,15 @@
+{
+  "name": "@kinestem/shared-types",
+  "version": "1.0.0",
+  "description": "Contratos DTO, eventos WebSocket y enums compartidos para KINESTEM",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'Linting shared-types...'"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
