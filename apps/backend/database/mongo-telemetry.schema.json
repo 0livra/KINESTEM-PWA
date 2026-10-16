@@ -1,0 +1,44 @@
+{
+  "$jsonSchema": {
+    "bsonType": "object",
+    "required": [
+      "match_id",
+      "user_id",
+      "ronda",
+      "microjuego_id",
+      "concepto_stem",
+      "tipo_resultado",
+      "tiempo_limite_ms",
+      "vidas_restantes",
+      "jugador_eliminado",
+      "timestamp"
+    ],
+    "properties": {
+      "_id": { "bsonType": "objectId" },
+      "match_id": { "bsonType": "int" },
+      "user_id": { "bsonType": "int" },
+      "estacion_hardware_id": { "bsonType": "int" },
+      "ronda": { "bsonType": "int" },
+      "microjuego_id": { "bsonType": "string" },
+      "concepto_stem": { "bsonType": "string" },
+      "dificultad_nivel": { "bsonType": "int" },
+      "tiempo_limite_ms": { "bsonType": "int" },
+      "tipo_resultado": {
+        "enum": ["EXITO", "ERROR_COMPONENTE", "TIMEOUT"]
+      },
+      "accion_fisica": {
+        "bsonType": ["object", "null"],
+        "properties": {
+          "componente_esperado": { "bsonType": "string" },
+          "componente_utilizado": { "bsonType": "string" },
+          "tiempo_reaccion_ms": { "bsonType": "int" },
+          "es_secuencia": { "bsonType": "bool" },
+          "precision_secuencia_pct": { "bsonType": "double" }
+        }
+      },
+      "vidas_restantes": { "bsonType": "int" },
+      "jugador_eliminado": { "bsonType": "bool" },
+      "timestamp": { "bsonType": "date" }
+    }
+  }
+}
