@@ -11,7 +11,10 @@
     "lint": "echo 'Linting frontend...'"
   },
   "dependencies": {
+    "@fontsource/baloo-2": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
     "@kinestem/shared-types": "workspace:*",
+    "lucide-react": "^1.59.0",
     "pixi.js": "^8.7.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -20,10 +23,12 @@
   },
   "devDependencies": {
     "@react-router/dev": "^7.1.5",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.10.7",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",
     "vite-plugin-pwa": "^0.21.1"
