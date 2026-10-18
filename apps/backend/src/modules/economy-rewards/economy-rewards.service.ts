@@ -1,4 +1,4 @@
-import { IEconomyRewardsRepository, economyRewardsRepository, PlayerMatchResult, RouletteSpinResult, RecompensaEntity } from './economy-rewards.repository';
+import { IEconomyRewardsRepository, economyRewardsRepository, PlayerMatchResult, RouletteSpinResult, RecompensaEntity, RouletteSettleParams, RouletteSettleResult } from './economy-rewards.repository';
 import { NotFoundError, InsufficientFundsError } from '../../shared/middlewares/error.middleware';
 
 export class EconomyRewardsService {
@@ -17,6 +17,17 @@ export class EconomyRewardsService {
   public async spinRoulette(userId: number, recompensaId: number, puntosApostados: number): Promise<RouletteSpinResult> {
     if (puntosApostados <= 0) throw new InsufficientFundsError('Los puntos apostados deben ser positivos.');
     return this.repo.spinRewardRoulette(userId, recompensaId, puntosApostados);
+  }
+
+  /**
+   * Liquidacion del giro de la ruleta SVG: persiste el costo del giro y el
+   * premio en PostgreSQL. La entrega fisica (DISPENSE) se autoriza por
+   * separado tras verificar el RFID del ganador.
+   */
+  public async settleRouletteSpin(params: RouletteSettleParams): Promise<RouletteSettleResult> {
+    if (params.puntosApostados <= 0) throw new InsufficientFundsError('El costo del giro debe ser positivo.');
+    if (params.puntosGanados < 0) throw new InsufficientFundsError('Los puntos ganados no pueden ser negativos.');
+    return this.repo.settleRouletteSpin(params);
   }
 }
 

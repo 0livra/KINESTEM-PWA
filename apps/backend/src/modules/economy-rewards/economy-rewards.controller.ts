@@ -16,6 +16,13 @@ const spinSchema = z.object({
   puntosApostados: z.number().int().positive(),
 });
 
+const settleSchema = z.object({
+  userId: z.number().int().positive(),
+  puntosApostados: z.number().int().positive(),
+  puntosGanados: z.number().int().min(0),
+  premioFisico: z.boolean(),
+});
+
 export class EconomyRewardsController {
   constructor(private readonly service: EconomyRewardsService = economyRewardsService) {}
 
@@ -36,6 +43,14 @@ export class EconomyRewardsController {
     try {
       const validated = spinSchema.parse(req.body);
       res.json({ success: true, data: await this.service.spinRoulette(validated.userId, validated.recompensaId, validated.puntosApostados) });
+    } catch (err) { next(err); }
+  };
+
+  /** Liquidacion del giro de la ruleta SVG (costo fijo + premio). */
+  public settle = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const validated = settleSchema.parse(req.body);
+      res.json({ success: true, data: await this.service.settleRouletteSpin(validated) });
     } catch (err) { next(err); }
   };
 }

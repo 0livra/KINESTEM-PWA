@@ -31,10 +31,24 @@ export interface PlayerMatchResult {
   esSobreviviente: boolean;
 }
 
+export interface RouletteSettleParams {
+  userId: number;
+  puntosApostados: number;
+  puntosGanados: number;
+  premioFisico: boolean;
+}
+
+export interface RouletteSettleResult {
+  nuevoSaldo: number;
+  premioFisico: boolean;
+  puntosGanados: number;
+}
+
 export interface IEconomyRewardsRepository {
   getAllRecompensas(): Promise<RecompensaEntity[]>;
   distributeMatchLoot(matchId: number, playerResults: PlayerMatchResult[]): Promise<void>;
   spinRewardRoulette(userId: number, recompensaId: number, puntosApostados: number): Promise<RouletteSpinResult>;
+  settleRouletteSpin(params: RouletteSettleParams): Promise<RouletteSettleResult>;
 }
 
 export class EconomyRewardsRepository implements IEconomyRewardsRepository {
@@ -144,6 +158,58 @@ export class EconomyRewardsRepository implements IEconomyRewardsRepository {
         won,
         command: won ? 'DISPENSE' : 'NONE',
         remainingBalance: saldoRes.rows[0]?.saldo_puntos ?? 0,
+      };
+    });
+  }
+
+  /**
+   * Liquidacion del giro de la ruleta SVG del frontend: descuenta el costo
+   * fijo del giro y abona los puntos ganados en una unica transaccion ACID.
+   * El comando DISPENSE (caja fisica) se emite aparte tras verificar el RFID
+   * del ganador; aqui solo se registra la economia del giro.
+   */
+  public async settleRouletteSpin(params: RouletteSettleParams): Promise<RouletteSettleResult> {
+    return postgresService.withTransaction(async (client) => {
+      const userRes = await client.query<{ saldo_puntos: number }>(
+        'SELECT saldo_puntos FROM usuarios WHERE user_id = $1 FOR UPDATE', [params.userId]
+      );
+      if (!userRes.rows[0]) throw new Error(`Usuario ${params.userId} no encontrado`);
+      if (userRes.rows[0].saldo_puntos < params.puntosApostados) {
+        throw new Error('Saldo insuficiente para girar la ruleta.');
+      }
+
+      await client.query(
+        'UPDATE usuarios SET saldo_puntos = saldo_puntos - $1 WHERE user_id = $2',
+        [params.puntosApostados, params.userId]
+      );
+
+      if (params.puntosGanados > 0) {
+        await client.query(
+          'UPDATE usuarios SET saldo_puntos = saldo_puntos + $1 WHERE user_id = $2',
+          [params.puntosGanados, params.userId]
+        );
+      }
+
+      await this.insertTransaction(
+        {
+          user_id: params.userId,
+          recompensa_id: null,
+          match_id: null,
+          tipo_transaccion: 'ruleta',
+          puntos_involucrados: params.puntosApostados,
+          resultado_ruleta: params.premioFisico,
+        },
+        client
+      );
+
+      const saldoRes = await client.query<{ saldo_puntos: number }>(
+        'SELECT saldo_puntos FROM usuarios WHERE user_id = $1', [params.userId]
+      );
+
+      return {
+        nuevoSaldo: saldoRes.rows[0]?.saldo_puntos ?? 0,
+        premioFisico: params.premioFisico,
+        puntosGanados: params.puntosGanados,
       };
     });
   }
