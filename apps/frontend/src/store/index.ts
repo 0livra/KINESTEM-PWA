@@ -28,12 +28,16 @@ export const useAppStore = create<AppStore>()(
         partialize: (state) => ({
           userId: state.userId,
           username: state.username,
+          avatarId: state.avatarId,
           saldoPuntos: state.saldoPuntos,
           pinTemporal: state.pinTemporal,
+          rfidUid: state.rfidUid,
+          isPaired: state.isPaired,
+          // Cuentas recordadas en este dispositivo (reconexion sin contraseña)
+          savedProfiles: state.savedProfiles,
           // Vínculo persistente con la estación física (desbloquea módulos del menú)
           linked: state.linked,
           linkedUsername: state.linkedUsername,
-          rfidUid: state.rfidUid,
           matchId: state.matchId,
           codigoSala: state.codigoSala,
         }),
