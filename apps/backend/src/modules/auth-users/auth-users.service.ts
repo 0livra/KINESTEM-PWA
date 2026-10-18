@@ -2,6 +2,8 @@ import { postgresService } from '../../config/postgres';
 import { authUsersRepository, IAuthUsersRepository } from './auth-users.repository';
 import { UsuarioEntity, PublicUserProfileDto, CreateUsuarioParams, PairingLinkParams } from './auth-users.types';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/middlewares/error.middleware';
+import { matchesService } from '../matches/matches.service';
+import { DUPLICATE_RFID_MATCH_MESSAGE } from '../matches/matches.service';
 
 export class AuthUsersService {
   constructor(private readonly repo: IAuthUsersRepository = authUsersRepository) {}
@@ -21,11 +23,23 @@ export class AuthUsersService {
   }
 
   public async linkRfidWithPin(params: PairingLinkParams): Promise<PublicUserProfileDto> {
-    return postgresService.withTransaction(async (client) => {
-      const user = await this.repo.linkRfid(params.pinTemporal, params.rfidUid, client);
-      if (!user) throw new ValidationError('PIN inválido, expirado, o RFID ya vinculado.');
-      return this.toPublicDto(user);
+    const user = await postgresService.withTransaction(async (client) => {
+      const linked = await this.repo.linkRfid(params.pinTemporal, params.rfidUid, client);
+      if (!linked) throw new ValidationError('PIN inválido, expirado, o RFID ya vinculado.');
+      return linked;
     });
+
+    // Admision a la partida activa con validacion anti-duplicados (match_id)
+    if (params.matchId) {
+      await matchesService.admitParticipant(params.matchId, user.user_id, params.rfidUid).catch((err) => {
+        if (err instanceof ConflictError) {
+          throw new ConflictError(DUPLICATE_RFID_MATCH_MESSAGE);
+        }
+        throw err;
+      });
+    }
+
+    return this.toPublicDto(user);
   }
 
   public async identifyByRfid(rfidUid: string): Promise<PublicUserProfileDto> {
@@ -46,7 +60,12 @@ export class AuthUsersService {
   }
 
   private toPublicDto(entity: UsuarioEntity): PublicUserProfileDto {
-    return { userId: entity.user_id, username: entity.username, saldoPuntos: entity.saldo_puntos };
+    return {
+      userId: entity.user_id,
+      username: entity.username,
+      saldoPuntos: entity.saldo_puntos,
+      avatarId: entity.avatar_id,
+    };
   }
 }
 

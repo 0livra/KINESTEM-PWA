@@ -4,11 +4,13 @@ import { AuthUsersService, authUsersService } from './auth-users.service';
 
 const registerSchema = z.object({
   username: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_-]+$/),
+  avatarId: z.string().regex(/^[a-z0-9_]+$/).max(32).optional(),
 });
 const generatePinSchema = z.object({ userId: z.number().int().positive() });
 const linkRfidSchema = z.object({
   pinTemporal: z.string().length(4).regex(/^\d{4}$/),
   rfidUid: z.string().min(4).max(32),
+  matchId: z.number().int().positive().optional(),
 });
 const identifySchema = z.object({ rfidUid: z.string().min(4).max(32) });
 

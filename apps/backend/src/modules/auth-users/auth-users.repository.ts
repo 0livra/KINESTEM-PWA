@@ -22,8 +22,9 @@ export class AuthUsersRepository implements IAuthUsersRepository {
   }
 
   public async findByRfidUid(rfidUid: string): Promise<UsuarioEntity | null> {
+    // La tarjeta activa apunta a un unico titular: el ultimo que la vinculo.
     const res = await postgresService.query<UsuarioEntity>(
-      'SELECT * FROM usuarios WHERE rfid_uid = $1', [rfidUid]
+      'SELECT * FROM usuarios WHERE rfid_uid = $1 ORDER BY user_id DESC LIMIT 1', [rfidUid]
     );
     return res.rows[0] ?? null;
   }
@@ -45,7 +46,8 @@ export class AuthUsersRepository implements IAuthUsersRepository {
 
   public async create(params: CreateUsuarioParams): Promise<UsuarioEntity> {
     const res = await postgresService.query<UsuarioEntity>(
-      'INSERT INTO usuarios (username) VALUES ($1) RETURNING *', [params.username]
+      `INSERT INTO usuarios (username, avatar_id) VALUES ($1, COALESCE($2, 'led_red_happy')) RETURNING *`,
+      [params.username, params.avatarId ?? null]
     );
     return res.rows[0]!;
   }
@@ -63,10 +65,16 @@ export class AuthUsersRepository implements IAuthUsersRepository {
     rfidUid: string,
     client: PoolClient
   ): Promise<UsuarioEntity | null> {
+    // Reasignacion de tarjeta activa: la misma tarjeta fisica puede cambiar de
+    // titular a lo largo del tiempo; se libera de cualquier usuario previo.
+    await client.query(
+      'UPDATE usuarios SET rfid_uid = NULL WHERE rfid_uid = $1', [rfidUid]
+    );
+
     const res = await client.query<UsuarioEntity>(
       `UPDATE usuarios
          SET rfid_uid = $1, pin_temporal = NULL
-       WHERE pin_temporal = $2 AND rfid_uid IS NULL
+       WHERE pin_temporal = $2
        RETURNING *`,
       [rfidUid, pinTemporal]
     );
