@@ -1,19 +1,25 @@
-import { Outlet, Link, isRouteErrorResponse } from 'react-router';
-import { useUserStore, useHardwareStore } from '../store';
+import { Outlet, isRouteErrorResponse } from 'react-router';
+import { TriangleAlert } from 'lucide-react';
+import { BottomStatusBar } from './components/bottom-status-bar';
+import { ArcadeButton } from './components/arcade-button';
+import { ArcadeTitle } from './components/arcade-title';
+import { LedMascot } from './components/led-mascot';
+import { useHardwareGateway } from './hooks/use-hardware-gateway';
 
 export function HydrateFallback() {
   return (
-    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A', color: '#F8FAFC' }}>
-      <div style={{ textAlign: 'center' }}>
-        <h2>Inicializando Consola KINESTEM...</h2>
-        <p style={{ color: '#94A3B8' }}>Cargando módulos interactivos en memoria RAM...</p>
-      </div>
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-halftone-ink">
+      <LedMascot color="blue" face="waiting" className="h-28 w-28 animate-float" />
+      <ArcadeTitle word="KINESTEM" className="text-4xl" />
+      <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-slate-400">
+        Inicializando consola portatil...
+      </p>
     </div>
   );
 }
 
 export function ErrorBoundary({ error }: { error: unknown }) {
-  let errorMessage = 'Ocurrió un error inesperado en la aplicación.';
+  let errorMessage = 'Ocurrio un error inesperado en la aplicacion.';
   if (isRouteErrorResponse(error)) {
     errorMessage = `${error.status} ${error.statusText}: ${error.data}`;
   } else if (error instanceof Error) {
@@ -21,67 +27,33 @@ export function ErrorBoundary({ error }: { error: unknown }) {
   }
 
   return (
-    <div style={{ padding: '2rem', backgroundColor: '#1E293B', color: '#EF4444', minHeight: '100vh' }}>
-      <h1>Error en KINESTEM Gateway</h1>
-      <pre style={{ backgroundColor: '#0F172A', padding: '1rem', borderRadius: '8px', color: '#FCA5A5' }}>
-        {errorMessage}
-      </pre>
-      <button
-        onClick={() => window.location.reload()}
-        style={{ marginTop: '1rem', padding: '0.75rem 1.5rem', background: '#3B82F6', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-      >
-        Reintentar conexión
-      </button>
+    <div className="flex min-h-dvh items-center justify-center bg-halftone-ink px-4">
+      <div className="w-full max-w-md rounded-2xl border-4 border-ink bg-arcade-red p-5 text-white shadow-[6px_6px_0px_#0F172A]">
+        <div className="flex items-center gap-3">
+          <TriangleAlert className="h-10 w-10 shrink-0" aria-hidden />
+          <h1 className="panel-title-extrusion font-display text-xl font-extrabold uppercase leading-tight tracking-wide">
+            Error del sistema
+          </h1>
+        </div>
+        <pre className="mt-3 max-h-40 overflow-auto rounded-xl border-2 border-ink bg-ink p-3 font-mono text-xs text-arcade-red">
+          {errorMessage}
+        </pre>
+        <ArcadeButton variant="yellow" block className="mt-4" onClick={() => window.location.reload()}>
+          Reintentar conexion
+        </ArcadeButton>
+      </div>
     </div>
   );
 }
 
 export default function RootLayout() {
-  const { username, saldoPuntos } = useUserStore((s) => ({
-    username: s.username,
-    saldoPuntos: s.saldoPuntos,
-  }));
-
-  const { wsStatus, mock } = useHardwareStore((s) => ({
-    wsStatus: s.wsStatus,
-    mock: s.mock,
-  }));
+  // Mantiene la conexión WebSocket con el gateway de hardware durante toda la sesión
+  useHardwareGateway();
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#0F172A', color: '#F8FAFC', fontFamily: 'system-ui, sans-serif' }}>
-      {/* Barra de navegación superior KINESTEM */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', backgroundColor: '#1E293B', borderBottom: '1px solid #334155' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <h1 style={{ margin: 0, fontSize: '1.25rem', color: '#38BDF8', fontWeight: 'bold' }}>
-            ⚡ KINESTEM CONSOLE
-          </h1>
-          <nav style={{ display: 'flex', gap: '1rem' }}>
-            <Link to="/auth-pairing" style={{ color: '#94A3B8', textDecoration: 'none' }}>Emparejamiento</Link>
-            <Link to="/lobby" style={{ color: '#94A3B8', textDecoration: 'none' }}>Lobby</Link>
-            <Link to="/arena" style={{ color: '#94A3B8', textDecoration: 'none' }}>Arena 60FPS</Link>
-            <Link to="/rewards-shop" style={{ color: '#94A3B8', textDecoration: 'none' }}>Tienda & Ruleta</Link>
-            <Link to="/analytics" style={{ color: '#94A3B8', textDecoration: 'none' }}>Analíticas</Link>
-          </nav>
-        </div>
-
-        {/* Indicadores de hardware y puntos */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: wsStatus === 'connected' ? '#10B981' : '#F59E0B' }} />
-            <span>Hardware: {mock ? 'Simulado (Mock)' : 'Arduino UNO'}</span>
-          </div>
-
-          <div style={{ backgroundColor: '#0F172A', padding: '0.35rem 0.75rem', borderRadius: '6px', border: '1px solid #334155' }}>
-            <span style={{ color: '#F59E0B', fontWeight: 'bold' }}>⭐ {saldoPuntos} pts</span>
-            {username && <span style={{ marginLeft: '0.5rem', color: '#94A3B8' }}>({username})</span>}
-          </div>
-        </div>
-      </header>
-
-      {/* Contenedor principal de rutas */}
-      <main style={{ padding: '2rem' }}>
-        <Outlet />
-      </main>
+    <div className="min-h-dvh">
+      <Outlet />
+      <BottomStatusBar />
     </div>
   );
 }

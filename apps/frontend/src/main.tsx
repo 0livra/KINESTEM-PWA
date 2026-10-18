@@ -1,7 +1,22 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router';
+
+// Tipografía arcade (display chunky + UI legible)
+import '@fontsource/baloo-2/400.css';
+import '@fontsource/baloo-2/600.css';
+import '@fontsource/baloo-2/700.css';
+import '@fontsource/baloo-2/800.css';
+import '@fontsource/nunito/400.css';
+import '@fontsource/nunito/600.css';
+import '@fontsource/nunito/700.css';
+import '@fontsource/nunito/800.css';
+
+// Sistema de diseño global (tokens arcade, halftone, animaciones)
+import './app/styles/global.css';
+
 import RootLayout, { HydrateFallback, ErrorBoundary } from './app/root';
+import MainMenuRoute from './app/routes/main-menu/route';
 import AuthPairingRoute, { clientLoader as authLoader } from './app/routes/auth-pairing/route';
 import LobbyRoute, { clientLoader as lobbyLoader } from './app/routes/lobby/route';
 import ArenaRoute from './app/routes/arena/route';
@@ -13,12 +28,11 @@ const router = createBrowserRouter([
     path: '/',
     element: <RootLayout />,
     HydrateFallback: HydrateFallback,
-    errorElement: <ErrorBoundary error={new Error('Error en aplicación')} />,
+    errorElement: <ErrorBoundary error={new Error('Error en aplicacion')} />,
     children: [
       {
         index: true,
-        loader: authLoader,
-        element: <AuthPairingRoute />,
+        element: <MainMenuRoute />,
       },
       {
         path: 'auth-pairing',
