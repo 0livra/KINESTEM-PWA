@@ -10,10 +10,16 @@ export class MatchesController {
     catch (err) { next(err); }
   };
 
+  /** Partida activa mas reciente (registrada ANTES de /:id). */
+  public getActive = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try { res.json({ success: true, data: await this.service.getActiveMatch() }); }
+    catch (err) { next(err); }
+  };
+
   public getById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const matchId = z.coerce.number().int().positive().parse(req.params['id']);
-      res.json({ success: true, data: await this.service.getMatch(matchId) });
+      res.json({ success: true, data: await this.service.getMatchWithParticipants(matchId) });
     } catch (err) { next(err); }
   };
 

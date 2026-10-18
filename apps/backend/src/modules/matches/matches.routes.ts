@@ -3,6 +3,7 @@ import { matchesController } from './matches.controller';
 
 const router = Router();
 router.post('/', matchesController.create);
+router.get('/active', matchesController.getActive);
 router.get('/:id', matchesController.getById);
 router.post('/:id/start', matchesController.start);
 router.post('/:id/finalize', matchesController.finalize);
