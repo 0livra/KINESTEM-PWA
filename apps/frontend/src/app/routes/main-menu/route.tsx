@@ -6,7 +6,7 @@ import { ArcadeTitle } from '../../components/arcade-title';
 import { FolderModeCard } from '../../components/folder-mode-card';
 import { CapacitorMascot, ChipMascot, GiftBoxMascot, LedMascot } from '../../components/led-mascot';
 import { DiamondSparkle, FourPointStar, MiniHeartSparkle } from '../../components/sparkles';
-import { useHardwareStore } from '../../../store';
+import { useHardwareStore, useUserStore } from '../../../store';
 
 interface ModeCardConfig {
   id: string;
@@ -107,6 +107,17 @@ export default function MainMenuRoute() {
     wsStatus: s.wsStatus,
   }));
 
+  const { username, saldoPuntos, isPaired } = useUserStore((s) => ({
+    username: s.username,
+    saldoPuntos: s.saldoPuntos,
+    isPaired: s.isPaired,
+  }));
+
+  // Compuerta de modulos: manda la sesion verificada (isPaired); linked es
+  // el espejo a nivel estacion del hardware slice.
+  const stationReady = isPaired || linked;
+  const stationName = username ?? linkedUsername;
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
@@ -119,13 +130,13 @@ export default function MainMenuRoute() {
   const activateCard = useCallback(
     (card: ModeCardConfig) => {
       setSelectedId(card.id);
-      if (card.requiresStation && !linked) {
+      if (card.requiresStation && !stationReady) {
         setHint('Cartucho bloqueado: vincula primero la Estación Física (IR + RFID)');
         return;
       }
       navigate(card.target);
     },
-    [linked, navigate]
+    [stationReady, navigate]
   );
 
   const handleSelectButton = useCallback(() => {
@@ -141,7 +152,6 @@ export default function MainMenuRoute() {
     <div className="min-h-dvh bg-halftone-navy bg-fixed">
       <ConsoleTopBar
         title="Kinestem"
-        subtitle="Consola Portátil STEM"
         onSelect={handleSelectButton}
         selectLabel="Seleccionar"
       />
@@ -160,9 +170,10 @@ export default function MainMenuRoute() {
 
         {/* Estado de la estación */}
         <div className="mb-6 mt-4 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest text-white/85">
-          <Zap className={`h-3.5 w-3.5 ${linked ? 'text-arcade-emerald' : 'text-slate-400'}`} aria-hidden />
+          <Zap className={`h-3.5 w-3.5 ${stationReady ? 'text-arcade-emerald' : 'text-slate-400'}`} aria-hidden />
           <span>
-            Estación: {linked ? `Vinculada${linkedUsername ? ` · ${linkedUsername}` : ''}` : 'Sin vincular'} ·
+            Estación: {stationReady ? `Vinculada${stationName ? ` · ${stationName}` : ''}` : 'Sin vincular'} ·
+            {saldoPuntos} pts ·
             Gateway {wsStatus === 'connected' ? 'en línea' : wsStatus === 'connecting' ? 'conectando' : 'desconectado'}
           </span>
         </div>
@@ -171,7 +182,7 @@ export default function MainMenuRoute() {
         <div className="mb-6 mt-4">
           <FolderModeCard
             {...MODE_CARDS[0]!}
-            locked={MODE_CARDS[0]!.requiresStation && !linked}
+            locked={MODE_CARDS[0]!.requiresStation && !stationReady}
             selected={selectedId === MODE_CARDS[0]!.id}
             onSelect={() => activateCard(MODE_CARDS[0]!)}
           >
@@ -185,7 +196,7 @@ export default function MainMenuRoute() {
             <FolderModeCard
               key={card.id}
               {...card}
-              locked={card.requiresStation && !linked}
+              locked={card.requiresStation && !stationReady}
               selected={selectedId === card.id}
               onSelect={() => activateCard(card)}
             >
