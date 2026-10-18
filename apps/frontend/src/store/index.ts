@@ -30,6 +30,12 @@ export const useAppStore = create<AppStore>()(
           username: state.username,
           saldoPuntos: state.saldoPuntos,
           pinTemporal: state.pinTemporal,
+          // Vínculo persistente con la estación física (desbloquea módulos del menú)
+          linked: state.linked,
+          linkedUsername: state.linkedUsername,
+          rfidUid: state.rfidUid,
+          matchId: state.matchId,
+          codigoSala: state.codigoSala,
         }),
       }
     ),
