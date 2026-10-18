@@ -16,8 +16,7 @@ async function bootstrap(): Promise<void> {
   server.timeout = 15000;
   server.keepAliveTimeout = 4000;
 
-  await postgresService.connect();
-  await mongoService.connect();
+  await Promise.all([postgresService.connect(), mongoService.connect()]);
   await serialService.init();
   hardwareGateway.init(server);
 
