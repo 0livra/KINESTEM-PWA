@@ -1,7 +1,30 @@
-import { AlertOctagon, Check, RotateCcw, ScanLine, X } from 'lucide-react';
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import { AlertOctagon, Check, LogOut, PlusCircle, RotateCcw, ScanLine, UserRound, X } from 'lucide-react';
 import type { LedMatrixFace, PairingPhase } from '../../../store/hardware.slice';
+import type { SavedProfile } from '../../../store/user.slice';
 import { LedMascot } from '../../components/led-mascot';
+import { LedAvatarSVG } from '../../components/led-avatar-svg';
 import { ArcadeButton } from '../../components/arcade-button';
+
+/* ------------------------------------------------------------------ */
+/* Avatares disponibles (identidad gestionada solo por auth-users)     */
+/* ------------------------------------------------------------------ */
+
+export interface AvatarOption {
+  avatarId: string;
+  label: string;
+  dotColor: string;
+}
+
+export const AVATAR_OPTIONS: AvatarOption[] = [
+  { avatarId: 'led_red_happy', label: 'LED Rojo', dotColor: '#EF4444' },
+  { avatarId: 'led_blue_happy', label: 'LED Azul', dotColor: '#60A5FA' },
+  { avatarId: 'led_green_happy', label: 'LED Verde', dotColor: '#4ADE80' },
+  { avatarId: 'led_yellow_happy', label: 'LED Amarillo', dotColor: '#F7E97A' },
+  { avatarId: 'led_pink_happy', label: 'LED Rosa', dotColor: '#F6A9C4' },
+];
 
 /* ------------------------------------------------------------------ */
 /* Indicador de progreso del emparejamiento (2 fases obligatorias)     */
@@ -324,5 +347,220 @@ export function IrVerdictFeedback({ status }: { status: 'correct' | 'incorrect' 
         </p>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* CASO A: sesion ya vinculada (isPaired)                              */
+/* ------------------------------------------------------------------ */
+
+/** Bloquea la re-verificación PIN/RFID y ofrece la desconexión limpia. */
+export function PairedStatePanel({
+  username,
+  rfidUid,
+  onDisconnect,
+}: {
+  username: string | null;
+  rfidUid: string | null;
+  onDisconnect: () => void;
+}) {
+  return (
+    <PanelGate
+      title="Sesion activa"
+      tone="green"
+      icon={Check}
+      panelLabel="Estado de vinculacion"
+    >
+      <div className="flex flex-col items-center gap-3 py-2 text-center">
+        <LedMascot color="green" face="cheer" className="h-20 w-20 animate-float" />
+        <p className="font-display text-lg font-extrabold uppercase leading-snug tracking-wide text-ink">
+          Ya estas correctamente vinculado a la estacion
+        </p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-ink/70">
+          {username ? `Usuario: ${username}` : 'Sin nombre'} ·{' '}
+          {rfidUid ? `Tarjeta ${rfidUid}` : 'Sin tarjeta activa'}
+        </p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-ink/50">
+          El ingreso de PIN por IR y la lectura RFID estan bloqueados en esta sesion
+        </p>
+        <ArcadeButton variant="red" size="lg" icon={LogOut} block className="mt-2" onClick={onDisconnect}>
+          Desconectarse del usuario actual
+        </ArcadeButton>
+      </div>
+    </PanelGate>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* CASO B: reconexion con perfiles guardados en el dispositivo         */
+/* ------------------------------------------------------------------ */
+
+export function ProfilePicker({
+  profiles,
+  onAdopt,
+  onNewProfile,
+}: {
+  profiles: SavedProfile[];
+  onAdopt: (profile: SavedProfile) => void;
+  onNewProfile: () => void;
+}) {
+  return (
+    <PanelGate title="Bienvenido de nuevo" tone="sky" icon={UserRound} panelLabel="Perfiles en este dispositivo">
+      <p className="text-center font-display text-sm font-extrabold uppercase leading-snug tracking-wide">
+        Deseas ingresar con tu usuario anterior o crear uno nuevo?
+      </p>
+      <div className="mt-4 grid gap-3">
+        {profiles.map((profile) => {
+          const option = AVATAR_OPTIONS.find((a) => a.avatarId === profile.avatarId);
+          return (
+            <div
+              key={profile.userId}
+              className="flex items-center justify-between gap-3 rounded-xl border-[3px] border-ink bg-arcade-yellow p-3 shadow-[3px_3px_0px_#0F172A]"
+            >
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-[3px] border-ink"
+                  style={{ backgroundColor: option?.dotColor ?? '#EF4444' }}
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <h4 className="truncate font-display text-sm font-extrabold uppercase tracking-wide text-ink">
+                    {profile.username}
+                  </h4>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-ink/70">
+                    {option?.label ?? profile.avatarId} · {profile.saldoPuntos} pts
+                  </p>
+                </div>
+              </div>
+              <ArcadeButton variant="blue" size="sm" onClick={() => onAdopt(profile)}>
+                Ingresar
+              </ArcadeButton>
+            </div>
+          );
+        })}
+      </div>
+      <ArcadeButton variant="magenta" size="md" icon={PlusCircle} block className="mt-4" onClick={onNewProfile}>
+        Crear un perfil nuevo
+      </ArcadeButton>
+    </PanelGate>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Alta de perfil nuevo sin contraseña                                 */
+/* ------------------------------------------------------------------ */
+
+export function NewUserForm({
+  onCreate,
+  busy,
+  defaultUsername = '',
+}: {
+  onCreate: (username: string, avatarId: string) => void;
+  busy?: boolean;
+  defaultUsername?: string;
+}) {
+  const [username, setUsername] = useState(defaultUsername);
+  const [avatarId, setAvatarId] = useState(AVATAR_OPTIONS[0]!.avatarId);
+  const valid = /^[a-zA-Z0-9_-]{3,50}$/.test(username.trim());
+
+  return (
+    <PanelGate title="Nuevo perfil" tone="magenta" icon={PlusCircle} panelLabel="Registro sin contrasena">
+      <label className="block">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-white/90">Nombre de jugador</span>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Ej. ESTUDIANTE_01"
+          maxLength={50}
+          autoComplete="off"
+          className="mt-1.5 w-full rounded-xl border-[3px] border-ink bg-white/95 px-3 py-2.5 font-display text-base font-extrabold uppercase tracking-wide text-ink shadow-[3px_3px_0px_#0F172A] outline-none placeholder:text-slate-400 focus:bg-white"
+        />
+      </label>
+      <p className="mt-1 text-[9px] font-bold uppercase tracking-widest text-white/70">
+        3 a 50 caracteres: letras, numeros, guion y guion bajo
+      </p>
+
+      <span className="mt-4 block text-[10px] font-bold uppercase tracking-widest text-white/90">
+        Elige tu avatar LED
+      </span>
+      <div className="mt-2 flex flex-wrap justify-center gap-3" role="radiogroup" aria-label="Avatar LED">
+        {AVATAR_OPTIONS.map((option) => {
+          const colorMap: Record<string, 'red' | 'green' | 'blue' | 'orange' | 'cream'> = {
+            led_red_happy: 'red',
+            led_blue_happy: 'blue',
+            led_green_happy: 'green',
+            led_yellow_happy: 'orange',
+            led_pink_happy: 'cream',
+          };
+          const ledColor = colorMap[option.avatarId] || 'red';
+          return (
+            <button
+              key={option.avatarId}
+              type="button"
+              role="radio"
+              aria-checked={avatarId === option.avatarId}
+              onClick={() => setAvatarId(option.avatarId)}
+              className={`flex min-h-[44px] flex-col items-center gap-1 rounded-xl border-[3px] px-2 py-2 transition-all duration-100 active:translate-y-[2px] ${
+                avatarId === option.avatarId
+                  ? 'border-white bg-ink shadow-[2px_2px_0px_rgba(255,255,255,0.35)]'
+                  : 'border-ink bg-white/95 shadow-[3px_3px_0px_#0F172A]'
+              }`}
+            >
+              <LedAvatarSVG color={ledColor} expression="smile" size={32} className="h-8 w-8" />
+              <span className="font-display text-[9px] font-extrabold uppercase tracking-wider">
+                {option.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <ArcadeButton
+        variant="yellow"
+        size="lg"
+        icon={PlusCircle}
+        block
+        className="mt-4"
+        disabled={!valid || busy}
+        onClick={() => onCreate(username.trim(), avatarId)}
+      >
+        {busy ? 'Creando perfil...' : 'Crear perfil y continuar'}
+      </ArcadeButton>
+    </PanelGate>
+  );
+}
+
+/* Panel base compartido de la puerta de entrada */
+function PanelGate({
+  title,
+  tone,
+  icon,
+  panelLabel,
+  children,
+}: {
+  title: string;
+  tone: 'green' | 'sky' | 'magenta';
+  icon: LucideIcon;
+  panelLabel: string;
+  children: ReactNode;
+}) {
+  const toneClass =
+    tone === 'green' ? 'bg-arcade-emerald text-ink' : tone === 'sky' ? 'bg-arcade-sky text-ink' : 'bg-arcade-magenta text-white';
+  const Icon = icon;
+  return (
+    <section
+      aria-label={panelLabel}
+      className={`animate-pop-in rounded-2xl border-4 border-ink p-4 shadow-[5px_5px_0px_#0F172A] ${toneClass}`}
+    >
+      <header className="mb-3 flex items-center gap-2 border-b-[3px] border-current/25 pb-2">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-[3px] border-ink bg-ink text-white" aria-hidden>
+          <Icon className="h-4 w-4" />
+        </span>
+        <h2 className="panel-title-extrusion font-display text-base font-extrabold uppercase leading-tight tracking-wide">
+          {title}
+        </h2>
+      </header>
+      {children}
+    </section>
   );
 }
