@@ -1,15 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { Application } from 'pixi.js';
-import { ArenaHud } from './arena-hud';
+import { Check, Home, TriangleAlert, X } from 'lucide-react';
+import { ConsoleTopBar } from '../../components/console-top-bar';
+import { ArcadeButton } from '../../components/arcade-button';
 import { useMatchStore, useUserStore } from '../../../store';
 import { GridMatrix, CELL_SIZE } from '../../../engine/core/grid-matrix';
 import { ElectronicComponentNode } from '../../../engine/nodes/ElectronicComponentNode';
 import { ComponentVisualState } from '../../../engine/core/circuit-types';
+import { ArenaHud } from './arena-hud';
+
+const CANVAS_WIDTH = 360;
+const CANVAS_HEIGHT = 420;
+const ROUND_SECONDS = 15;
 
 export default function ArenaRoute() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const nodeRef = useRef<ElectronicComponentNode | null>(null);
+  const navigate = useNavigate();
 
   const { ronda, vidasRestantes, decrementLives, advanceRound } = useMatchStore((s) => ({
     ronda: s.ronda,
@@ -22,7 +31,14 @@ export default function ArenaRoute() {
     updateSaldo: s.updateSaldo,
   }));
 
-  const [timerSeconds] = useState(15);
+  const [timerSeconds, setTimerSeconds] = useState(ROUND_SECONDS);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimerSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [ronda]);
 
   useEffect(() => {
     let isDestroyed = false;
@@ -34,8 +50,8 @@ export default function ArenaRoute() {
 
     const initPixi = async () => {
       await app.init({
-        width: 800,
-        height: 480,
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT,
         backgroundColor: 0x0f172a,
         antialias: true,
         resolution: window.devicePixelRatio || 1,
@@ -50,11 +66,11 @@ export default function ArenaRoute() {
       canvasContainer.appendChild(app.canvas);
 
       // Instanciación de matriz lógica y nodo de componente electrónico
-      const matrix = new GridMatrix(10, 6, CELL_SIZE);
+      const matrix = new GridMatrix(8, 10, CELL_SIZE);
       const resistorNode = new ElectronicComponentNode({
         type: 'resistor',
-        col: 4,
-        row: 2,
+        col: 3,
+        row: 4,
         cellSize: CELL_SIZE,
         matrix,
       });
@@ -69,7 +85,7 @@ export default function ArenaRoute() {
       app.stage.addChild(resistorNode);
     };
 
-    initPixi();
+    void initPixi();
 
     return () => {
       isDestroyed = true;
@@ -80,83 +96,71 @@ export default function ArenaRoute() {
     };
   }, [updateSaldo]);
 
-  const handleTriggerState = (state: ComponentVisualState) => {
-    if (nodeRef.current) {
-      nodeRef.current.setState(state);
-    }
-    if (state === 'fail') {
-      decrementLives();
-    } else if (state === 'success') {
-      updateSaldo(50);
-      advanceRound();
-    }
-  };
+  const handleTriggerState = useCallback(
+    (state: ComponentVisualState) => {
+      if (nodeRef.current) {
+        nodeRef.current.setState(state);
+      }
+      if (state === 'fail') {
+        decrementLives();
+        setTimerSeconds(ROUND_SECONDS);
+      } else if (state === 'success') {
+        updateSaldo(50);
+        advanceRound();
+        setTimerSeconds(ROUND_SECONDS);
+      }
+    },
+    [advanceRound, decrementLives, updateSaldo]
+  );
 
   return (
-    <div style={{ maxWidth: 840, margin: '0 auto' }}>
-      <ArenaHud
-        ronda={ronda}
-        vidas={vidasRestantes}
-        timerSeconds={timerSeconds}
-        maxTimerSeconds={15}
-        stemConcept="Ley de Ohm (Resistencias)"
-        challengeInstruction="Conecta la resistencia adecuada para proteger el circuito contra sobrecarga."
+    <div className="min-h-dvh bg-halftone-ink bg-fixed">
+      <ConsoleTopBar
+        title="Arena STEM"
+        subtitle={`Ronda ${ronda} · Supervivencia`}
+        onBack={() => navigate('/')}
+        backLabel="Volver"
       />
 
-      {/* Contenedor del Lienzo WebGL Pixi.js */}
-      <div
-        ref={containerRef}
-        style={{
-          width: 800,
-          height: 480,
-          borderRadius: 12,
-          overflow: 'hidden',
-          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)',
-          border: '2px solid #334155',
-          margin: '0 auto',
-        }}
-      />
+      <main className="mx-auto w-full max-w-md px-4 pb-32 pt-5">
+        <ArenaHud
+          ronda={ronda}
+          vidas={vidasRestantes}
+          timerSeconds={timerSeconds}
+          maxTimerSeconds={ROUND_SECONDS}
+          stemConcept="Ley de Ohm (Resistencias)"
+          challengeInstruction="Conecta la resistencia adecuada"
+        />
 
-      {/* Controles de verificación de Whiteboxing & Estados */}
-      <div
-        style={{
-          marginTop: '1.5rem',
-          display: 'flex',
-          justifyContent: 'center',
-          gap: '1rem',
-          padding: '1rem',
-          backgroundColor: '#1E293B',
-          borderRadius: 8,
-        }}
-      >
-        <span style={{ alignSelf: 'center', color: '#94A3B8', fontSize: '0.85rem' }}>
-          Simular Estado del Contenedor Ancla:
-        </span>
-        <button
-          onClick={() => handleTriggerState('idle')}
-          style={{ padding: '0.5rem 1rem', background: '#64748B', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-        >
-          Idle
-        </button>
-        <button
-          onClick={() => handleTriggerState('warning')}
-          style={{ padding: '0.5rem 1rem', background: '#F59E0B', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-        >
-          Warning
-        </button>
-        <button
-          onClick={() => handleTriggerState('success')}
-          style={{ padding: '0.5rem 1rem', background: '#10B981', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-        >
-          Success (+50 pts)
-        </button>
-        <button
-          onClick={() => handleTriggerState('fail')}
-          style={{ padding: '0.5rem 1rem', background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-        >
-          Fail (-1 vida)
-        </button>
-      </div>
+        {/* Lienzo WebGL Pixi.js: circuito de 60 FPS */}
+        <div
+          ref={containerRef}
+          className="mx-auto mt-4 w-full overflow-hidden rounded-2xl border-4 border-ink shadow-[5px_5px_0px_rgba(15,23,42,0.6)] [&>canvas]:h-auto [&>canvas]:w-full"
+          style={{ maxWidth: `${CANVAS_WIDTH}px` }}
+          aria-label="Lienzo de circuito interactivo"
+        />
+
+        {/* Controles de verificación de estados (whiteboxing) */}
+        <div className="mt-5 rounded-2xl border-4 border-ink bg-slate-800 p-4 shadow-[5px_5px_0px_#0F172A]">
+          <p className="mb-3 text-center text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+            Simular estado del contenedor ancla
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <ArcadeButton variant="green" icon={Check} onClick={() => handleTriggerState('success')}>
+              Exito (+50)
+            </ArcadeButton>
+            <ArcadeButton variant="red" icon={X} onClick={() => handleTriggerState('fail')}>
+              Fallo (-1 vida)
+            </ArcadeButton>
+            <ArcadeButton variant="yellow" icon={TriangleAlert} onClick={() => handleTriggerState('warning')}>
+              Advertencia
+            </ArcadeButton>
+            <ArcadeButton variant="dark" icon={Home} onClick={() => navigate('/')}>
+              Al menu
+            </ArcadeButton>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

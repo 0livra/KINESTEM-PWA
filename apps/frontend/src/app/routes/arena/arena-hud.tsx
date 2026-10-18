@@ -1,3 +1,4 @@
+import { Timer } from 'lucide-react';
 import { LivesIndicator } from '../lobby/lobby-components';
 
 export interface ArenaHudProps {
@@ -21,43 +22,37 @@ export function ArenaHud({
   const isUrgent = progressPct <= 30;
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
-        padding: '1rem',
-        backgroundColor: '#1E293B',
-        borderRadius: '12px',
-        border: '1px solid #334155',
-        marginBottom: '1rem',
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <span style={{ fontSize: '0.85rem', color: '#94A3B8', textTransform: 'uppercase' }}>
-            Ronda {ronda} • Concepto: <strong style={{ color: '#38BDF8' }}>{stemConcept}</strong>
-          </span>
-          <h3 style={{ margin: '0.25rem 0 0 0', color: '#F8FAFC' }}>{challengeInstruction}</h3>
+    <div className="rounded-2xl border-4 border-ink bg-ink p-4 shadow-[5px_5px_0px_rgba(15,23,42,0.6)]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[10px] font-bold uppercase tracking-[0.22em] text-arcade-sky">
+            Ronda {ronda} · Concepto: {stemConcept}
+          </p>
+          <h3 className="mt-0.5 truncate font-display text-base font-extrabold uppercase leading-tight tracking-wide text-white">
+            {challengeInstruction}
+          </h3>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
           <LivesIndicator lives={vidas} />
-          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: isUrgent ? '#EF4444' : '#F59E0B' }}>
-            ⏱️ {timerSeconds}s
-          </div>
+          <span
+            className={`flex items-center gap-1 font-display text-lg font-extrabold tabular-nums ${
+              isUrgent ? 'animate-pulse text-arcade-red' : 'text-arcade-yellow'
+            }`}
+          >
+            <Timer className="h-4 w-4" aria-hidden />
+            {timerSeconds}s
+          </span>
         </div>
       </div>
 
-      {/* Barra de progreso de tiempo restante */}
-      <div style={{ width: '100%', height: 6, backgroundColor: '#0F172A', borderRadius: 3, overflow: 'hidden' }}>
+      {/* Barra de tiempo restante */}
+      <div className="mt-3 h-2.5 overflow-hidden rounded-full border-2 border-slate-700 bg-slate-900">
         <div
-          style={{
-            width: `${progressPct}%`,
-            height: '100%',
-            backgroundColor: isUrgent ? '#EF4444' : '#10B981',
-            transition: 'width 1s linear, background-color 0.3s ease',
-          }}
+          className={`h-full rounded-full transition-[width] duration-1000 ease-linear ${
+            isUrgent ? 'bg-arcade-red' : 'bg-arcade-emerald'
+          }`}
+          style={{ width: `${progressPct}%` }}
         />
       </div>
     </div>
