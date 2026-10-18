@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
 export default defineConfig({
   plugins: [
     react(),
+    tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
@@ -13,7 +15,7 @@ export default defineConfig({
         name: 'KINESTEM - Consola Educativa Interactiva',
         short_name: 'KINESTEM',
         description: 'PWA de Consola Educativa STEM con Pixi.js y WebSockets',
-        theme_color: '#1E293B',
+        theme_color: '#123A9E',
         background_color: '#0F172A',
         display: 'standalone',
         icons: [
