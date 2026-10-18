@@ -1,8 +1,11 @@
 /**
  * Cabecera superior tipo consola portátil: botón táctil azul con insignia
- * circular "B" (Volver) a la izquierda y botón rojo con insignia "A"
- * (Seleccionar) a la derecha, sobre una barra azul profundo con rayas.
+ * circular "B" (Volver) a la izquierda, círculo central de usuario con avatar LED,
+ * y botón rojo con insignia "A" (Seleccionar) a la derecha, sobre una barra azul
+ * profundo con rayas.
  */
+import { LedAvatarSVG } from './led-avatar-svg';
+
 export interface ConsoleTopBarProps {
   title: string;
   subtitle?: string;
@@ -10,6 +13,10 @@ export interface ConsoleTopBarProps {
   onSelect?: () => void;
   backLabel?: string;
   selectLabel?: string;
+  /** Avatar LED del usuario activo (opcional, muestra icono genérico si no se proporciona) */
+  avatarColor?: 'red' | 'green' | 'blue' | 'orange' | 'cream';
+  avatarExpression?: 'wink' | 'smile' | 'serious' | 'dizzy';
+  showUserAvatar?: boolean;
 }
 
 function BadgeButton({
@@ -59,22 +66,37 @@ export function ConsoleTopBar({
   onSelect,
   backLabel = 'Volver',
   selectLabel = 'Seleccionar',
+  avatarColor = 'red',
+  avatarExpression = 'smile',
+  showUserAvatar = false,
 }: ConsoleTopBarProps) {
   return (
     <header className="sticky top-0 z-30 border-b-4 border-ink bg-arcade-navy-deep bg-stripes-dark pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex w-full max-w-md items-center justify-between gap-2 px-3 py-2.5">
         <BadgeButton badge="B" label={backLabel} tone="blue" onClick={onBack} disabled={!onBack} />
 
-        <div className="min-w-0 flex-1 text-center">
-          <h1 className="panel-title-extrusion truncate font-display text-lg font-extrabold uppercase leading-tight tracking-wide text-white">
-            {title}
-          </h1>
-          {subtitle ? (
-            <p className="truncate text-[10px] font-bold uppercase tracking-[0.2em] text-arcade-sky-deep">
-              {subtitle}
-            </p>
-          ) : null}
-        </div>
+        {/* Círculo central de usuario con avatar LED */}
+        {showUserAvatar ? (
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-arcade-navy shadow-[2px_2px_0px_#0F172A]">
+            <LedAvatarSVG
+              color={avatarColor}
+              expression={avatarExpression}
+              size={40}
+              className="h-10 w-10"
+            />
+          </div>
+        ) : (
+          <div className="min-w-0 flex-1 text-center">
+            <h1 className="panel-title-extrusion truncate font-display text-lg font-extrabold uppercase leading-tight tracking-wide text-white">
+              {title}
+            </h1>
+            {subtitle ? (
+              <p className="truncate text-[10px] font-bold uppercase tracking-[0.2em] text-arcade-sky-deep">
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
+        )}
 
         <BadgeButton badge="A" label={selectLabel} tone="red" onClick={onSelect} disabled={!onSelect} />
       </div>
