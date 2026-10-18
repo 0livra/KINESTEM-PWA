@@ -4,7 +4,7 @@ import { ConsoleTopBar } from '../../components/console-top-bar';
 import { ArcadeButton } from '../../components/arcade-button';
 import { PanelCard } from '../../components/panel-card';
 import { ChipMascot } from '../../components/led-mascot';
-import { useMatchStore } from '../../../store';
+import { useMatchStore, useUserStore } from '../../../store';
 import { PlayerCard } from './lobby-components';
 import type { ParticipantItem } from './lobby-components';
 
@@ -51,6 +51,11 @@ export default function LobbyRoute() {
   const data = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const { setMatch } = useMatchStore((s) => ({ setMatch: s.setMatch }));
+  const { isPaired, avatarId, disconnectCurrentUser } = useUserStore((s) => ({
+    isPaired: s.isPaired,
+    avatarId: s.avatarId,
+    disconnectCurrentUser: s.disconnectCurrentUser,
+  }));
 
   const handleStartArena = () => {
     setMatch({
@@ -64,13 +69,38 @@ export default function LobbyRoute() {
     navigate('/arena');
   };
 
+  const handleBack = () => {
+    disconnectCurrentUser();
+    navigate('/standby');
+  };
+
+  // Mapeo de avatarId a color y expresión
+  const getAvatarProps = (id: string) => {
+    const colorMap: Record<string, 'red' | 'green' | 'blue' | 'orange' | 'cream'> = {
+      led_red_happy: 'red',
+      led_blue_happy: 'blue',
+      led_green_happy: 'green',
+      led_yellow_happy: 'orange',
+      led_pink_happy: 'cream',
+    };
+    return {
+      color: colorMap[id] || 'red',
+      expression: 'smile' as const,
+    };
+  };
+
+  const avatarProps = getAvatarProps(avatarId);
+
   return (
     <div className="min-h-dvh bg-halftone-navy bg-fixed">
       <ConsoleTopBar
-        title="Lobby"
-        subtitle={`Sala ${data.codigoSala}`}
-        onBack={() => navigate('/')}
-        backLabel="Volver"
+        title={isPaired ? '' : 'Lobby'}
+        subtitle={isPaired ? '' : `Sala ${data.codigoSala}`}
+        onBack={handleBack}
+        backLabel="Salir"
+        avatarColor={avatarProps.color}
+        avatarExpression={avatarProps.expression}
+        showUserAvatar={isPaired}
       />
 
       <main className="mx-auto w-full max-w-md px-4 pb-32 pt-6">
