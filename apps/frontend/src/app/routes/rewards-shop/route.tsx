@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLoaderData, useNavigate } from 'react-router';
-import { Coins, Gift, Package, Sparkles, Trophy } from 'lucide-react';
+import { Coins, Gift, KeyRound, Package, ScanLine, Sparkles, Trophy } from 'lucide-react';
 import { ConsoleTopBar } from '../../components/console-top-bar';
 import { ArcadeButton } from '../../components/arcade-button';
 import { PanelCard } from '../../components/panel-card';
 import { GiftBoxMascot, LedMascot } from '../../components/led-mascot';
 import { FourPointStar } from '../../components/sparkles';
-import { useUserStore } from '../../../store';
-import { sendDispenseCommand } from '../../hardware/gateway-client';
+import { useHardwareStore, useUserStore } from '../../../store';
+import { sendDispenseCommand, simulateRfidRead, subscribeRfidReads } from '../../hardware/gateway-client';
 import { AsymmetricRoulette, ROULETTE_SECTORS, TOTAL_WEIGHT } from './asymmetric-roulette';
 import type { Sector } from './asymmetric-roulette';
 
@@ -35,44 +35,114 @@ export async function clientLoader() {
   return { shopItems: (shopItemsRes.data as ShopItem[]) ?? [] };
 }
 
-type SpinOutcome =
-  | { kind: 'points'; sector: Sector }
-  | { kind: 'physical'; sector: Sector }
-  | null;
+/** Costo fijo por giro de la ruleta (regla economica del hito). */
+const SPIN_COST = 150;
+
+type SpinPhase = 'idle' | 'WAITING_WINNER_RFID_CONFIRMATION' | 'DISPENSED';
+
+type PointsOutcome = { kind: 'points'; sector: Sector } | null;
 
 export default function RewardsShopRoute() {
   const data = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
-  const { saldoPuntos, updateSaldo } = useUserStore((s) => ({
+  const { userId, username, rfidUid, saldoPuntos, updateSaldo, setSaldoPuntos } = useUserStore((s) => ({
+    userId: s.userId,
+    username: s.username,
+    rfidUid: s.rfidUid,
     saldoPuntos: s.saldoPuntos,
     updateSaldo: s.updateSaldo,
+    setSaldoPuntos: s.setSaldoPuntos,
   }));
 
-  const [outcome, setOutcome] = useState<SpinOutcome>(null);
+  const wsStatus = useHardwareStore((s) => s.wsStatus);
+
+  const [pointsOutcome, setPointsOutcome] = useState<PointsOutcome>(null);
+  const [spinPhase, setSpinPhase] = useState<SpinPhase>('idle');
+  const [dispenseAck, setDispenseAck] = useState<boolean | null>(null);
+  const [rfidMismatch, setRfidMismatch] = useState(false);
   const [redeemedItem, setRedeemedItem] = useState<string | null>(null);
+  const redeemTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!redeemedItem) return;
-    const timer = setTimeout(() => setRedeemedItem(null), 3200);
-    return () => clearTimeout(timer);
-  }, [redeemedItem]);
+    return () => {
+      if (redeemTimer.current) clearTimeout(redeemTimer.current);
+    };
+  }, []);
 
-  const handleSpinEnd = (winner: Sector) => {
-    if (winner.rewardType === 'PHYSICAL_BOX') {
-      // Único premio físico real: libera la caja con el Servo SG90
-      sendDispenseCommand();
-      setOutcome({ kind: 'physical', sector: winner });
-      return;
-    }
-    // Sectores normales: solo suman puntos al saldo del jugador
-    updateSaldo(winner.pointsValue);
-    setOutcome({ kind: 'points', sector: winner });
-  };
+  /** Persiste la economia del giro en PostgreSQL (respaldo, modo local si falla). */
+  const settleSpin = useCallback(
+    async (puntosGanados: number, premioFisico: boolean) => {
+      if (userId === null) return;
+      const res = await fetch('/api/v1/economy/roulette/settle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, puntosApostados: SPIN_COST, puntosGanados, premioFisico }),
+      })
+        .then((r) => r.json())
+        .catch(() => null);
+      if (res?.success && typeof res?.data?.nuevoSaldo === 'number') {
+        setSaldoPuntos(Number(res.data.nuevoSaldo));
+      }
+    },
+    [setSaldoPuntos, userId]
+  );
+
+  const handleSpinEnd = useCallback(
+    (winner: Sector) => {
+      if (userId === null) return;
+      setRfidMismatch(false);
+      setDispenseAck(null);
+
+      // El costo del giro se descuenta siempre
+      updateSaldo(-SPIN_COST);
+
+      if (winner.rewardType === 'PHYSICAL_BOX') {
+        // Caja fisica: NO se dispensa todavia; se espera el RFID del ganador
+        void settleSpin(0, true);
+        setPointsOutcome(null);
+        setSpinPhase('WAITING_WINNER_RFID_CONFIRMATION');
+        return;
+      }
+
+      // Sector de puntos: abono inmediato al saldo
+      updateSaldo(winner.pointsValue);
+      void settleSpin(winner.pointsValue, false);
+      setPointsOutcome({ kind: 'points', sector: winner });
+      setSpinPhase('idle');
+    },
+    [settleSpin, updateSaldo, userId]
+  );
+
+  /**
+   * Verificacion RFID del ganador: solo cuando el uid escaneado coincide con
+   * el del usuario ganador se emite el comando DISPENSE al Servo SG90.
+   */
+  useEffect(() => {
+    if (spinPhase !== 'WAITING_WINNER_RFID_CONFIRMATION') return;
+    const unsubscribe = subscribeRfidReads((uid) => {
+      if (rfidUid && uid === rfidUid) {
+        const ack = sendDispenseCommand();
+        setDispenseAck(ack);
+        setRfidMismatch(false);
+        setSpinPhase('DISPENSED');
+      } else {
+        setRfidMismatch(true);
+      }
+    });
+    return unsubscribe;
+  }, [spinPhase, rfidUid]);
+
+  const rouletteLocked =
+    spinPhase === 'WAITING_WINNER_RFID_CONFIRMATION' ||
+    spinPhase === 'DISPENSED' ||
+    userId === null;
 
   const handleRedeem = (item: ShopItem) => {
     if (saldoPuntos < item.costo_puntos || item.stock === 0) return;
     updateSaldo(-item.costo_puntos);
     setRedeemedItem(item.nombre);
+    if (redeemTimer.current) clearTimeout(redeemTimer.current);
+    redeemTimer.current = setTimeout(() => setRedeemedItem(null), 3200);
   };
 
   return (
@@ -97,41 +167,110 @@ export default function RewardsShopRoute() {
         {/* Ruleta SVG asimétrica (premio físico exacto 1/6) */}
         <PanelCard tone="ink" icon={Sparkles} title="Ruleta de la Caja" className="relative animate-pop-in">
           <FourPointStar className="absolute right-3 top-3 h-5 w-5" />
-          <AsymmetricRoulette onSpinEnd={handleSpinEnd} />
+          <AsymmetricRoulette onSpinEnd={handleSpinEnd} disabled={rouletteLocked || saldoPuntos < SPIN_COST} />
 
-          <p className="mt-4 text-center text-[10px] font-bold uppercase leading-relaxed tracking-widest text-slate-400">
-            Sector fisico: {TOTAL_WEIGHT > 0 ? Math.round((10 / TOTAL_WEIGHT) * 10000) / 100 : 0}% del disco ·
-            Los demas sectores suman puntos
-          </p>
+          {userId === null ? (
+            <p className="mt-4 rounded-xl border-[3px] border-ink bg-arcade-red px-3 py-2 text-center font-display text-xs font-extrabold uppercase tracking-wide text-white shadow-[3px_3px_0px_#0F172A]">
+              Vinculate a la estacion para girar la ruleta
+            </p>
+          ) : saldoPuntos < SPIN_COST ? (
+            <p className="mt-4 rounded-xl border-[3px] border-ink bg-arcade-amber px-3 py-2 text-center font-display text-xs font-extrabold uppercase tracking-wide text-ink shadow-[3px_3px_0px_#0F172A]">
+              Necesitas {SPIN_COST} puntos para girar (tienes {saldoPuntos})
+            </p>
+          ) : (
+            <p className="mt-4 text-center text-[10px] font-bold uppercase leading-relaxed tracking-widest text-slate-400">
+              Cada giro cuesta {SPIN_COST} pts · Sector fisico:{' '}
+              {TOTAL_WEIGHT > 0 ? Math.round((10 / TOTAL_WEIGHT) * 10000) / 100 : 0}% del disco
+            </p>
+          )}
 
-          {outcome?.kind === 'points' ? (
+          {/* Resultado de sector de puntos */}
+          {pointsOutcome && spinPhase === 'idle' ? (
             <div
               role="status"
               className="animate-pop-in mt-4 flex items-center gap-3 rounded-xl border-[3px] border-ink bg-arcade-emerald p-3 text-ink shadow-[4px_4px_0px_#0F172A]"
             >
               <Trophy className="h-8 w-8 shrink-0" aria-hidden />
               <p className="font-display text-base font-extrabold uppercase leading-tight tracking-wide">
-                {outcome.sector.label} agregados
+                {pointsOutcome.sector.label} ganados
                 <span className="mt-0.5 block text-[10px] font-bold tracking-widest opacity-80">
-                  Tu saldo ahora es {saldoPuntos} puntos
+                  Costo del giro: {SPIN_COST} pts · Saldo: {saldoPuntos} pts
                 </span>
               </p>
             </div>
           ) : null}
 
-          {outcome?.kind === 'physical' ? (
+          {/* Premio fisico ganado: esperando RFID del ganador */}
+          {spinPhase === 'WAITING_WINNER_RFID_CONFIRMATION' ? (
             <div
               role="status"
               className="animate-pop-in mt-4 rounded-xl border-[3px] border-ink bg-arcade-magenta p-3 text-white shadow-[4px_4px_0px_#0F172A]"
             >
               <div className="flex items-center gap-3">
+                <GiftBoxMascot face="surprised" className="h-16 w-16 shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-display text-base font-extrabold uppercase leading-tight tracking-wide">
+                    Premio de Caja Fisica ganado
+                  </p>
+                  <p className="mt-0.5 text-[10px] font-bold uppercase leading-relaxed tracking-widest opacity-90">
+                    Escanea tu tarjeta RFID en la consola para verificar tu identidad y abrir la caja
+                  </p>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-center gap-2 rounded-lg border-2 border-ink bg-ink/85 py-1.5">
+                <ScanLine className="h-4 w-4 animate-pulse text-arcade-yellow" aria-hidden />
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-arcade-yellow">
+                  Esperando tarjeta de {username ?? 'el ganador'}
+                </span>
+              </div>
+              {rfidMismatch ? (
+                <p
+                  role="alert"
+                  className="mt-2 rounded-lg border-2 border-ink bg-arcade-red px-2 py-1.5 text-center text-[10px] font-extrabold uppercase tracking-widest"
+                >
+                  Esta tarjeta no corresponde al ganador de la caja
+                </p>
+              ) : null}
+
+              {/* Lector de demostracion (sin Arduino) */}
+              {wsStatus !== 'connected' ? (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <ArcadeButton
+                    variant="dark"
+                    size="sm"
+                    icon={ScanLine}
+                    onClick={() => simulateRfidRead(rfidUid ?? 'UID_SIN_TARJETA')}
+                  >
+                    Tarjeta del ganador (demo)
+                  </ArcadeButton>
+                  <ArcadeButton
+                    variant="dark"
+                    size="sm"
+                    icon={ScanLine}
+                    onClick={() => simulateRfidRead('UID_INTRUSO')}
+                  >
+                    Tarjeta de otro (demo)
+                  </ArcadeButton>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Caja abierta tras verificar el RFID del ganador */}
+          {spinPhase === 'DISPENSED' ? (
+            <div
+              role="status"
+              className="animate-pop-in mt-4 rounded-xl border-[3px] border-ink bg-arcade-emerald p-3 text-ink shadow-[4px_4px_0px_#0F172A]"
+            >
+              <div className="flex items-center gap-3">
                 <GiftBoxMascot face="cheer" className="h-16 w-16 shrink-0" />
                 <div className="min-w-0">
                   <p className="font-display text-base font-extrabold uppercase leading-tight tracking-wide">
-                    Caja fisica liberada
+                    Identidad verificada · Caja abierta
                   </p>
-                  <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest opacity-90">
-                    Senal DISPENSE enviada al Servo SG90 · Reclama tu premio en el dispensador
+                  <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest opacity-80">
+                    Comando DISPENSE {dispenseAck ? 'enviado' : 'en cola'} al Servo SG90 · Reclama tu premio en el
+                    dispensador
                   </p>
                 </div>
               </div>
@@ -213,12 +352,16 @@ export default function RewardsShopRoute() {
 
         {/* Leyenda de sectores (sin emojis, solo geometria) */}
         <PanelCard tone="navy" className="mt-7">
-          <h3 className="mb-2 font-display text-sm font-extrabold uppercase tracking-widest text-arcade-yellow">
+          <h3 className="mb-2 flex items-center gap-2 font-display text-sm font-extrabold uppercase tracking-widest text-arcade-yellow">
+            <KeyRound className="h-4 w-4" aria-hidden />
             Sectores del disco
           </h3>
           <ul className="grid gap-1.5">
             {ROULETTE_SECTORS.map((sector) => (
-              <li key={sector.id} className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-200">
+              <li
+                key={sector.id}
+                className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-200"
+              >
                 <span
                   className="h-3.5 w-3.5 rounded-sm border-2 border-ink"
                   style={{ backgroundColor: sector.color }}

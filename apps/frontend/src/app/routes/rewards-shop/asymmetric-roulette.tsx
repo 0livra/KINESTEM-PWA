@@ -73,9 +73,11 @@ function pickWeightedWinner(sectors: SectorGeometry[]): SectorGeometry {
 export interface AsymmetricRouletteProps {
   onSpinEnd: (winner: Sector) => void;
   disabled?: boolean;
+  /** Costo fijo por giro (mostrado en el boton); 150 PTS por defecto. */
+  costPoints?: number;
 }
 
-export function AsymmetricRoulette({ onSpinEnd, disabled = false }: AsymmetricRouletteProps) {
+export function AsymmetricRoulette({ onSpinEnd, disabled = false, costPoints = 150 }: AsymmetricRouletteProps) {
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const spinTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -197,7 +199,7 @@ export function AsymmetricRoulette({ onSpinEnd, disabled = false }: AsymmetricRo
         onClick={handleSpin}
         className="min-w-[220px]"
       >
-        {isSpinning ? 'Girando ruleta...' : 'Girar ruleta'}
+        {isSpinning ? 'Girando ruleta...' : `Girar ruleta (${costPoints} PTS)`}
       </ArcadeButton>
     </div>
   );
