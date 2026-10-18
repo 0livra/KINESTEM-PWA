@@ -1,7 +1,9 @@
 import { useLoaderData, useNavigate } from 'react-router';
-import { BarChart3, Gauge, Target, Timer } from 'lucide-react';
+import { BarChart3, Coins, Gauge, Target, Timer } from 'lucide-react';
 import { ConsoleTopBar } from '../../components/console-top-bar';
 import { PanelCard } from '../../components/panel-card';
+import { LedAvatarSVG } from '../../components/led-avatar-svg';
+import { useUserStore } from '../../../store';
 import { StemRadarMock, MortalityTimeline } from './charts-components';
 
 export interface ConceptMetric {
@@ -49,6 +51,12 @@ export async function clientLoader() {
 export default function AnalyticsRoute() {
   const data = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
+  const { username, avatarId, saldoPuntos, isPaired } = useUserStore((s) => ({
+    username: s.username,
+    avatarId: s.avatarId,
+    saldoPuntos: s.saldoPuntos,
+    isPaired: s.isPaired,
+  }));
 
   const summaryCards = [
     {
@@ -71,6 +79,23 @@ export default function AnalyticsRoute() {
     },
   ];
 
+  // Mapeo de avatarId a color y expresión
+  const getAvatarProps = (id: string) => {
+    const colorMap: Record<string, 'red' | 'green' | 'blue' | 'orange' | 'cream'> = {
+      led_red_happy: 'red',
+      led_blue_happy: 'blue',
+      led_green_happy: 'green',
+      led_yellow_happy: 'orange',
+      led_pink_happy: 'cream',
+    };
+    return {
+      color: colorMap[id] || 'red',
+      expression: 'smile' as const,
+    };
+  };
+
+  const avatarProps = getAvatarProps(avatarId);
+
   return (
     <div className="min-h-dvh bg-halftone-navy bg-fixed">
       <ConsoleTopBar
@@ -81,6 +106,32 @@ export default function AnalyticsRoute() {
       />
 
       <main className="mx-auto w-full max-w-md px-4 pb-32 pt-6">
+        {/* Tarjeta de identidad completa del jugador activo */}
+        {isPaired && username ? (
+          <div className="mb-6 rounded-2xl border-4 border-ink bg-arcade-navy-deep p-4 shadow-[5px_5px_0px_#0F172A]">
+            <div className="flex items-center gap-4">
+              <LedAvatarSVG
+                color={avatarProps.color}
+                expression={avatarProps.expression}
+                size={80}
+                className="h-20 w-20 shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <h2 className="panel-title-extrusion truncate font-display text-xl font-extrabold uppercase tracking-wide text-white">
+                  {username}
+                </h2>
+                <div className="mt-2 flex items-center gap-2">
+                  <Coins className="h-5 w-5 text-arcade-yellow" aria-hidden />
+                  <span className="font-display text-lg font-extrabold tabular-nums text-arcade-yellow">
+                    {saldoPuntos}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-300">puntos</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* Resumen de métricas (post-partida) */}
         <div className="grid grid-cols-3 gap-3">
           {summaryCards.map((card) => (
