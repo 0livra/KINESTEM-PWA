@@ -1,65 +1,48 @@
+import { HeartPulse } from 'lucide-react';
+
 export interface ParticipantItem {
   id: number;
   username: string;
-  avatarUrl: string;
+  rfidUid: string | null;
   vidas: number;
   ready: boolean;
 }
 
+/** Vidas como corazones vectoriales (cero emojis). */
 export function LivesIndicator({ lives, maxLives = 3 }: { lives: number; maxLives?: number }) {
   return (
-    <div style={{ display: 'flex', gap: '0.25rem' }}>
+    <span className="flex items-center gap-1" role="img" aria-label={`${lives} de ${maxLives} vidas`}>
       {Array.from({ length: maxLives }).map((_, idx) => (
-        <span
+        <HeartPulse
           key={idx}
-          style={{
-            fontSize: '1.25rem',
-            filter: idx < lives ? 'none' : 'grayscale(100%) opacity(30%)',
-          }}
-        >
-          ❤️
-        </span>
+          className={`h-5 w-5 ${idx < lives ? 'text-arcade-red' : 'text-slate-600 opacity-40'}`}
+          aria-hidden
+        />
       ))}
-    </div>
+    </span>
   );
 }
 
 export function PlayerCard({ player }: { player: ParticipantItem }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '1rem',
-        backgroundColor: '#1E293B',
-        borderRadius: '8px',
-        border: '1px solid #334155',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <div
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            backgroundColor: '#0284C7',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 'bold',
-          }}
+    <div className="flex items-center justify-between gap-3 rounded-xl border-[3px] border-ink bg-arcade-yellow p-3 shadow-[4px_4px_0px_#0F172A]">
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-[3px] border-ink bg-arcade-sky font-display text-lg font-extrabold text-ink"
+          aria-hidden
         >
           {player.username.charAt(0).toUpperCase()}
-        </div>
-        <div>
-          <h4 style={{ margin: 0 }}>{player.username}</h4>
-          <span style={{ fontSize: '0.75rem', color: player.ready ? '#34D399' : '#F59E0B' }}>
-            {player.ready ? 'Listo para jugar' : 'Esperando asignación'}
-          </span>
+        </span>
+        <div className="min-w-0">
+          <h4 className="truncate font-display text-sm font-extrabold uppercase tracking-wide text-ink">
+            {player.username}
+          </h4>
+          <p className="truncate text-[10px] font-bold uppercase tracking-widest text-ink/70">
+            {player.rfidUid ? `Credencial ${player.rfidUid}` : 'Sin credencial'} ·{' '}
+            {player.ready ? 'Listo' : 'En espera'}
+          </p>
         </div>
       </div>
-
       <LivesIndicator lives={player.vidas} />
     </div>
   );

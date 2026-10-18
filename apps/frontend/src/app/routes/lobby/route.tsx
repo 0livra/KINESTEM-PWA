@@ -1,26 +1,49 @@
 import { useLoaderData, useNavigate } from 'react-router';
-import { PlayerCard, ParticipantItem } from './lobby-components';
+import { Info, Play, Users } from 'lucide-react';
+import { ConsoleTopBar } from '../../components/console-top-bar';
+import { ArcadeButton } from '../../components/arcade-button';
+import { PanelCard } from '../../components/panel-card';
+import { ChipMascot } from '../../components/led-mascot';
 import { useMatchStore } from '../../../store';
+import { PlayerCard } from './lobby-components';
+import type { ParticipantItem } from './lobby-components';
 
 export async function clientLoader() {
-  // Carga concurrente con Promise.all para erradicar cascadas de red (waterfalls)
-  const [matchConfigRes, activePlayersRes] = await Promise.all([
+  // Carga concurrente de la partida y el estado del gateway (sin cascadas)
+  const [matchConfigRes, statusRes] = await Promise.all([
     fetch('/api/v1/matches/1').then((r) => r.json()).catch(() => ({
-      data: { match: { id: 1, codigo_sala: 'KINE-STEM-01', ronda_actual: 1, vidas_iniciales: 3 } },
+      data: { id: 1, codigo_sala: 'KINE-STEM-01', ronda_actual: 1, vidas_iniciales: 3 },
     })),
-    fetch('/api/v1/status').then((r) => r.json()).catch(() => ({ status: 'running' })),
+    fetch('/api/v1/health').then((r) => r.json()).catch(() => ({ status: 'offline' })),
   ]);
 
+  const matchData = (matchConfigRes.data as Record<string, unknown>) ?? {};
+  const rawParticipants = Array.isArray(matchData['participantes'])
+    ? (matchData['participantes'] as Record<string, unknown>[])
+    : [];
+
   const defaultPlayers: ParticipantItem[] = [
-    { id: 1, username: 'Player Alpha', avatarUrl: '', vidas: 3, ready: true },
-    { id: 2, username: 'Player Beta', avatarUrl: '', vidas: 3, ready: true },
-    { id: 3, username: 'Player Gamma', avatarUrl: '', vidas: 2, ready: false },
+    { id: 1, username: 'Estudiante Alpha', rfidUid: 'UID_8F3A21', vidas: 3, ready: true },
+    { id: 2, username: 'Estudiante Beta', rfidUid: 'UID_55B7C0', vidas: 3, ready: true },
   ];
 
+  const players: ParticipantItem[] =
+    rawParticipants.length > 0
+      ? rawParticipants.map((p, idx) => ({
+          id: Number(p['user_id'] ?? idx + 1),
+          username: String(p['username'] ?? `Jugador ${idx + 1}`),
+          rfidUid: typeof p['rfid_uid'] === 'string' ? p['rfid_uid'] : null,
+          vidas: Number(p['vidas_restantes'] ?? 3),
+          ready: true,
+        }))
+      : defaultPlayers;
+
   return {
-    matchConfig: matchConfigRes.data?.match || { codigo_sala: 'KINE-001', vidas_iniciales: 3 },
-    systemStatus: activePlayersRes,
-    players: defaultPlayers,
+    matchId: Number(matchData['id'] ?? 1),
+    codigoSala: String(matchData['codigo_sala'] ?? 'KINE-STEM-01'),
+    vidasIniciales: Number(matchData['vidas_iniciales'] ?? 3),
+    systemStatus: statusRes,
+    players,
   };
 }
 
@@ -31,54 +54,64 @@ export default function LobbyRoute() {
 
   const handleStartArena = () => {
     setMatch({
-      matchId: 1,
-      codigoSala: data.matchConfig.codigo_sala,
+      matchId: data.matchId,
+      codigoSala: data.codigoSala,
       estadoPartida: 'in_progress',
       ronda: 1,
-      vidasRestantes: 3,
+      vidasRestantes: data.vidasIniciales,
       eliminado: false,
     });
     navigate('/arena');
   };
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.75rem', margin: 0 }}>Sala de Espera (Lobby)</h2>
-          <p style={{ color: '#94A3B8', margin: '0.25rem 0 0 0' }}>
-            Código de Sala: <strong style={{ color: '#38BDF8' }}>{data.matchConfig.codigo_sala}</strong>
-          </p>
+    <div className="min-h-dvh bg-halftone-navy bg-fixed">
+      <ConsoleTopBar
+        title="Lobby"
+        subtitle={`Sala ${data.codigoSala}`}
+        onBack={() => navigate('/')}
+        backLabel="Volver"
+      />
+
+      <main className="mx-auto w-full max-w-md px-4 pb-32 pt-6">
+        {/* Cabecera de sala */}
+        <div className="mb-5 flex items-center justify-between gap-3 rounded-2xl border-4 border-ink bg-arcade-navy-deep p-4 shadow-[5px_5px_0px_#0F172A]">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-arcade-sky">Codigo de sala</p>
+            <h2 className="panel-title-extrusion truncate font-display text-2xl font-extrabold uppercase tracking-wide text-white">
+              {data.codigoSala}
+            </h2>
+            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-300">
+              Gateway: {String(data.systemStatus?.status ?? 'en linea')}
+            </p>
+          </div>
+          <ChipMascot face="happy" className="h-16 w-16 shrink-0 animate-float" />
         </div>
-        <button
-          onClick={handleStartArena}
-          style={{
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#10B981',
-            color: '#FFFFFF',
-            border: 'none',
-            borderRadius: '8px',
-            fontWeight: 'bold',
-            fontSize: '1rem',
-            cursor: 'pointer',
-          }}
-        >
-          Iniciar Partida en Arena ⚔️
-        </button>
-      </div>
 
-      <h3 style={{ color: '#E2E8F0', marginBottom: '1rem' }}>Estudiantes en la partida</h3>
-      <div style={{ display: 'grid', gap: '1rem' }}>
-        {data.players.map((p) => (
-          <PlayerCard key={p.id} player={p} />
-        ))}
-      </div>
+        {/* Accion principal para el pulgar */}
+        <ArcadeButton variant="green" size="lg" icon={Play} block className="mb-6" onClick={handleStartArena}>
+          Iniciar partida en Arena
+        </ArcadeButton>
 
-      <div style={{ marginTop: '2rem', padding: '1rem', backgroundColor: '#1E293B', borderRadius: '8px' }}>
-        <p style={{ margin: 0, fontSize: '0.85rem', color: '#94A3B8' }}>
-          💡 Cada participante inicia con <strong>{data.matchConfig.vidas_iniciales} vidas</strong>. Si fallas un componente de circuito o se agota el tiempo límite de la ronda, perderás 1 vida.
-        </p>
-      </div>
+        {/* Participantes */}
+        <PanelCard tone="ink" icon={Users} title="Estudiantes en la partida" className="animate-pop-in">
+          <div className="grid gap-3">
+            {data.players.map((player) => (
+              <PlayerCard key={player.id} player={player} />
+            ))}
+          </div>
+        </PanelCard>
+
+        {/* Reglas de supervivencia */}
+        <PanelCard tone="sky" icon={Info} title="Reglas de la Arena" className="mt-5 animate-pop-in">
+          <ul className="grid gap-1.5 text-xs font-bold leading-relaxed text-ink">
+            <li>Cada participante inicia con {data.vidasIniciales} vidas.</li>
+            <li>Fallar un componente de circuito cuesta 1 vida.</li>
+            <li>Agotar el tiempo limite de la ronda cuesta 1 vida.</li>
+            <li>La ultima consola en pie gana el botin de puntos.</li>
+          </ul>
+        </PanelCard>
+      </main>
     </div>
   );
 }
