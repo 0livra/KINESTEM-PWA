@@ -64,6 +64,8 @@ export interface UserDto {
   rfid_uid: string | null;
   username: string;
   saldo_puntos: number;
+  /** Identificador del avatar LED (ej. 'led_red_happy'); gestionado solo por auth-users. */
+  avatar_id: string;
   avatar_url?: string;
   created_at: string;
   updated_at: string;
@@ -72,6 +74,7 @@ export interface UserDto {
 export interface CreateUserDto {
   username: string;
   rfid_uid?: string;
+  avatar_id?: string;
   pin?: string;
 }
 
@@ -98,6 +101,7 @@ export interface PairingStatusDto {
   username?: string;
   rfidUid?: string;
   deviceUid?: string;
+  avatarId?: string;
 }
 
 // ============================================================================
@@ -123,7 +127,9 @@ export interface MatchParticipantDto {
   match_id: number;
   user_id: number;
   username?: string;
+  avatar_id?: string;
   avatar_url?: string;
+  rfid_uid?: string | null;
   vidas_restantes: number;
   eliminado: boolean;
   puntuacion_acumulada: number;
