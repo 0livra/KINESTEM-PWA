@@ -28,7 +28,6 @@ export class HardwareGateway {
       const clientIp = req.socket.remoteAddress || 'unknown';
       console.log(`[WS] Cliente conectado desde ${clientIp}. Total activos: ${this.wss?.clients.size ?? 0}`);
 
-      // Mensaje de bienvenida inicial con estado
       const welcomeMsg: ServerWebSocketMessage = {
         type: 'CONNECTED',
         host: clientIp,
@@ -83,13 +82,14 @@ export class HardwareGateway {
 
       case 'SUBMIT_PIN': {
         const pin = String(msg.pin).trim();
-        this.serial.sendCommand(HardwareProtocol.formatLcdCommand('PIN RECIBIDO', 'ESPERANDO TAG'));
+        // El backend instruye al hardware el PIN objetivo
+        this.serial.sendCommand(HardwareProtocol.formatSetPinCommand(pin));
 
         this.broadcast({
           type: 'AUTH_WAITING',
           pin,
           sessionId: null,
-          message: 'PIN aceptado en pasarela. Esperando tarjeta RFID...',
+          message: 'PIN sincronizado con Arduino Maestro. Esperando ingreso IR...',
           timestamp: Date.now(),
         });
         break;
@@ -136,7 +136,6 @@ export class HardwareGateway {
 
       if (frame.event === 'RFID') {
         const uid = frame.data;
-        this.serial.sendCommand(HardwareProtocol.formatStatusOkCommand());
         this.broadcast({
           type: 'AUTH_LINKED',
           uid,

@@ -1,16 +1,3 @@
-/**
- * KINESTEM - Cliente del Gateway de Hardware (WebSocket + Serial)
- *
- * Integra el frontend con el flujo real de la estación física:
- *  - Sensor IR (pulsos de dígitos del control remoto)
- *  - Lector RFID-RC522 (tramas `RFID:<uid>` que disparan el evento AUTH_LINKED)
- *  - LCD 16x2 I2C y Matriz LED 8x8 (espejados como feedback visual)
- *  - Servo SG90 (comando DISPENSE de la caja misteriosa, tras verificar RFID)
- *
- * La lógica de dominio vive en funciones módulo-level que leen el store
- * con `getState()`, de modo que el WebSocket real y la simulación de
- * demostración (sin Arduino) recorren exactamente el mismo camino.
- */
 import type { ClientWebSocketMessage, ServerWebSocketMessage, MatchDto } from '@kinestem/shared-types';
 import { useAppStore } from '../../store';
 import type { MatchParticipantLite } from '../../store/match.slice';
@@ -23,7 +10,6 @@ const jsonHeaders = { 'Content-Type': 'application/json' };
 /* Utilidades de traduccion backend -> estado de partida                */
 /* ------------------------------------------------------------------ */
 
-/** Proyecta un MatchParticipantDto (con rfid_uid opcional) al estado ligero. */
 function toParticipantLite(raw: Record<string, unknown>): MatchParticipantLite {
   return {
     userId: Number(raw['user_id'] ?? raw['userId'] ?? 0),
@@ -40,7 +26,6 @@ function toParticipantLite(raw: Record<string, unknown>): MatchParticipantLite {
   };
 }
 
-/** Sincroniza los participantes de la partida activa desde el backend. */
 export function syncMatchParticipants(match: MatchDto | Record<string, unknown> | null | undefined): void {
   if (!match) return;
   const rawList =
@@ -55,10 +40,6 @@ export function syncMatchParticipants(match: MatchDto | Record<string, unknown> 
 /* Cuentas sin contraseña (registro local con respaldo del backend)    */
 /* ------------------------------------------------------------------ */
 
-/**
- * Registra un perfil nuevo (sin contraseña) y lo fija como sesion actual.
- * Con backend caido opera en modo local con un id de respaldo.
- */
 export async function registerNewUser(username: string, avatarId: string): Promise<number> {
   const res = await fetch('/api/v1/auth/register', {
     method: 'POST',
@@ -88,19 +69,13 @@ export async function registerNewUser(username: string, avatarId: string): Promi
 /* ------------------------------------------------------------------ */
 
 /**
- * Valida los 4 dígitos capturados por IR contra el PIN de la sesión.
- * Refleja el veredicto que la consola muestra en la LCD 16x2 y la
- * matriz LED 8x8 (carita feliz / cara confundida).
+ * El hardware Maestro es ahora el encargado de validar los dígitos IR.
+ * Esta función se mantiene vacía para no romper referencias externas.
  */
 export function validateIrPinDigits(): void {
-  const s = store();
-  if (s.pairingPhase !== 'WAITING_IR_CODE') return;
-  if (s.irDigits.length !== 4) return;
-  const entered = s.irDigits.join('');
-  s.setIrCodeStatus(entered === s.pairingPin ? 'correct' : 'incorrect');
+  // Validación de PIN transferida 100% al hardware C++
 }
 
-/** Confirma el PIN aceptado hacia el gateway (LCD: "PIN RECIBIDO | ESPERANDO TAG"). */
 export function announcePinAcceptedToGateway(): void {
   const { pairingPin } = store();
   if (pairingPin) {
@@ -115,7 +90,6 @@ export function announcePinAcceptedToGateway(): void {
 type RfidReadListener = (uid: string) => void;
 const rfidReadListeners = new Set<RfidReadListener>();
 
-/** Suscribe un oyente a cada lectura RFID de la estacion. */
 export function subscribeRfidReads(listener: RfidReadListener): () => void {
   rfidReadListeners.add(listener);
   return () => {
@@ -131,30 +105,20 @@ function notifyRfidListeners(uid: string): void {
 /* FASE 2: Escaneo RFID + bloqueo anti-duplicados + vinculo backend    */
 /* ------------------------------------------------------------------ */
 
-/**
- * Procesa una lectura RFID (evento `RFID:<uid>` del serial o AUTH_LINKED).
- * 1. Notifica a los oyentes (confirmacion del ganador de la ruleta).
- * 2. En Fase 2 de vinculacion: vincula la tarjeta (el backend reasigna la
- *    tarjeta activa), admite al jugador en la partida activa validando
- *    anti-duplicados y activa la sesion sin contraseña.
- */
 export async function processRfidUid(uid: string): Promise<void> {
   notifyRfidListeners(uid);
 
   const s = store();
-  // La Fase 2 solo esta habilitada tras "Codigo correcto" en la Fase 1
   if (s.pairingPhase !== 'WAITING_RFID_SCAN' && s.pairingPhase !== 'RFID_DUPLICATED') return;
 
   const current = useAppStore.getState();
   const username = current.username ?? `JUGADOR ${uid.slice(-2).toUpperCase()}`;
   let userId = current.userId;
 
-  // 1) Alta del usuario nuevo (cuentas sin contraseña)
   if (userId === null) {
     userId = await registerNewUser(username, current.avatarId);
   }
 
-  // 2) Vinculo tarjeta + admision a la partida activa (anti-duplicados en BD)
   const linkPayload: Record<string, unknown> = {
     pinTemporal: current.pairingPin,
     rfidUid: uid,
@@ -172,12 +136,10 @@ export async function processRfidUid(uid: string): Promise<void> {
   const linkMessage = String(link?.message ?? link?.error ?? '');
 
   if (link && link.success === false) {
-    // Duplicado en la partida activa: rechazo inmediato con banner explicito
     if (linkMessage.includes('ya está registrada') || linkMessage.includes('ya esta registrada')) {
       store().rejectDuplicatedRfid(uid);
       return;
     }
-    // PIN invalido u otro error de validacion: se reintenta el flujo
     store().setLastEvent('LINK_ERROR', linkMessage);
   }
 
@@ -195,7 +157,6 @@ export async function processRfidUid(uid: string): Promise<void> {
     return;
   }
 
-  // 3) Respaldo sin backend: admision local anti-duplicados
   const candidateName = useAppStore.getState().username ?? username;
   const result = useAppStore.getState().admitParticipant({ username: candidateName, rfidUid: uid });
   if (!result.ok && result.reason === 'DUPLICATED_RFID') {
@@ -211,7 +172,6 @@ export async function processRfidUid(uid: string): Promise<void> {
 /* Dispensador fisico (Servo SG90 de la caja misteriosa)               */
 /* ------------------------------------------------------------------ */
 
-/** Dispara la señal de dispensación física hacia el Servo SG90. */
 export function sendDispenseCommand(): boolean {
   return sendGatewayCommand({ type: 'DISPENSE_TEST' });
 }
@@ -219,18 +179,6 @@ export function sendDispenseCommand(): boolean {
 /* ------------------------------------------------------------------ */
 /* Dispatcher de mensajes del gateway                                  */
 /* ------------------------------------------------------------------ */
-
-function extractIrDigit(event: string, data: unknown): string | undefined {
-  // Tramas compatibles: IR:5 | IR_KEY {key:"5"} | RAW "IR:5" | BTN:* (pulso sin dígito)
-  const raw = typeof data === 'string' ? data : '';
-  const irMatch = raw.match(/^IR:(\d)$/i) ?? event.match(/^IR:?(\d)$/i);
-  if (irMatch?.[1]) return irMatch[1];
-  if (typeof data === 'object' && data !== null && 'key' in data) {
-    const key = String((data as { key: unknown }).key);
-    if (/^\d$/.test(key)) return key;
-  }
-  return undefined;
-}
 
 export function handleGatewayMessage(msg: ServerWebSocketMessage): void {
   const s = store();
@@ -248,7 +196,6 @@ export function handleGatewayMessage(msg: ServerWebSocketMessage): void {
     }
 
     case 'AUTH_WAITING': {
-      // El gateway confirma el PIN aceptado; solo abre sesión si no hay una activa
       if (useAppStore.getState().pairingPhase === 'IDLE' && msg.pin) {
         s.startPairingSession(msg.pin);
       }
@@ -265,13 +212,12 @@ export function handleGatewayMessage(msg: ServerWebSocketMessage): void {
       s.setLastEvent(msg.event, msg.data);
       if (msg.event === 'RFID') {
         void processRfidUid(String(msg.data));
-      } else if (msg.event.startsWith('IR') || (msg.event === 'RAW' && String(msg.data).startsWith('IR:'))) {
-        s.registerIrPulse(extractIrDigit(msg.event, msg.data));
-        if (useAppStore.getState().irDigits.length === 4) {
-          validateIrPinDigits();
-        }
-      } else if (msg.event.startsWith('BTN:')) {
-        s.registerIrPulse(undefined);
+      } else if (msg.event === 'IR_DIGIT') {
+        s.registerIrPulse(String(msg.data));
+      } else if (msg.event === 'PIN_VALIDATED') {
+        s.setIrCodeStatus('correct');
+      } else if (msg.event === 'PIN_ERROR') {
+        s.setIrCodeStatus('incorrect');
       }
       break;
     }
@@ -350,9 +296,7 @@ function connect(): void {
   socket.onmessage = (ev: MessageEvent) => {
     try {
       handleGatewayMessage(JSON.parse(String(ev.data)) as ServerWebSocketMessage);
-    } catch {
-      // Tramas no-JSON ignoradas silenciosamente
-    }
+    } catch { }
   };
 
   socket.onopen = () => {
@@ -378,13 +322,11 @@ function scheduleReconnect(): void {
   }, 3000);
 }
 
-/** Abre (o mantiene) la conexión con el gateway de hardware. */
 export function acquireHardwareGateway(): void {
   refCount += 1;
   connect();
 }
 
-/** Libera la conexión cuando el último consumidor desmonta. */
 export function releaseHardwareGateway(): void {
   refCount = Math.max(0, refCount - 1);
   if (refCount === 0) {
@@ -402,31 +344,20 @@ export function releaseHardwareGateway(): void {
 /* Simuladores de demostración (sin Arduino conectado)                 */
 /* ------------------------------------------------------------------ */
 
-/** Simula una tecla del Control Remoto IR. */
 export function simulateIrKey(digit: string): void {
   const s = store();
   s.registerIrPulse(digit);
-  if (useAppStore.getState().irDigits.length === 4) {
-    validateIrPinDigits();
-  }
 }
 
-/** Simula el envío del PIN con resultado forzado (verificación rápida). */
 export function simulateIrSubmit(force: 'correct' | 'incorrect'): void {
   store().setIrCodeStatus(force);
 }
 
-/** Simula la lectura de una tarjeta/llavero en el RC522. */
 export function simulateRfidScan(uid: string): void {
   store().setLastEvent('RFID', uid);
   void processRfidUid(uid);
 }
 
-/**
- * Emite una lectura RFID de demostracion SOLO al bus de oyentes
- * (p. ej. confirmacion del ganador de la ruleta), sin atravesar el
- * flujo de emparejamiento de la estacion.
- */
 export function simulateRfidRead(uid: string): void {
   store().setLastEvent('RFID_DEMO', uid);
   notifyRfidListeners(uid);

@@ -8,8 +8,6 @@ import { useHardwareStore, useMatchStore, useUserStore } from '../../../store';
 import {
   announcePinAcceptedToGateway,
   registerNewUser,
-  simulateIrKey,
-  simulateRfidScan,
   syncMatchParticipants,
 } from '../../hardware/gateway-client';
 import type { SavedProfile } from '../../../store/user.slice';
@@ -34,9 +32,6 @@ export async function clientLoader() {
   ]);
   return { systemStatus: statusRes, gatewayPing: gatewayPingRes };
 }
-
-const KEYPAD_DIGITS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
-const DEMO_RFID_CARDS = ['UID_8F3A21', 'UID_55B7C0', 'UID_A1D94E'];
 
 type GateStep = 'CHOOSER' | 'NEW_USER' | 'SESSION';
 
@@ -99,13 +94,11 @@ export default function AuthPairingRoute() {
   const [loadingPin, setLoadingPin] = useState(false);
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* Sincroniza la partida activa y sus participantes (anti-duplicados RFID) */
   useEffect(() => {
     if (gateStep !== 'SESSION') return;
     let cancelled = false;
     const syncMatch = async () => {
       if (matchId) return;
-      // Partida activa mas reciente del backend; si no existe, se crea una de sala
       const active = await fetch('/api/v1/matches/active').then((r) => r.json()).catch(() => null);
       let match = active?.data ?? null;
       if (!match) {
@@ -129,7 +122,6 @@ export default function AuthPairingRoute() {
     };
   }, []);
 
-  /* Genera el PIN y abre la FASE 1 (nunca salta directo a RFID) */
   const handleGeneratePin = useCallback(async () => {
     setLoadingPin(true);
     try {
@@ -169,14 +161,12 @@ export default function AuthPairingRoute() {
     [adoptSavedProfile]
   );
 
-  /* CASO A: desconexión limpia conservando los perfiles guardados */
   const handleDisconnect = useCallback(() => {
     disconnectCurrentUser();
     resetPairing();
     setGateStep('CHOOSER');
   }, [disconnectCurrentUser, resetPairing]);
 
-  /* "Código correcto": confirma al gateway y avanza a la FASE 2 */
   useEffect(() => {
     if (pairingPhase === 'IR_CODE_CORRECT') {
       announcePinAcceptedToGateway();
@@ -190,7 +180,6 @@ export default function AuthPairingRoute() {
     };
   }, [pairingPhase, beginRfidScanPhase]);
 
-  /* "Ingreso correcto": vincula perfil y transiciona al Lobby */
   useEffect(() => {
     if (pairingPhase === 'PAIRING_COMPLETE' && rfidUid) {
       advanceTimer.current = setTimeout(() => navigate('/lobby'), 2200);
@@ -211,21 +200,18 @@ export default function AuthPairingRoute() {
       />
 
       <main className="mx-auto w-full max-w-md px-4 pb-32 pt-6">
-        {/* Espejo de la consola física: LCD 16x2 I2C + Matriz LED 8x8 */}
         <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border-4 border-ink bg-slate-800 p-4 shadow-[5px_5px_0px_#0F172A]">
           <div className="min-w-0 flex-1">
             <LcdMock message={lcdMessage} />
             <div className="mt-2 flex items-center gap-3">
               <IrPulseLed pulseAt={irPulseAt} />
               <span
-                className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${
-                  wsStatus === 'connected' ? 'text-arcade-emerald' : 'text-slate-400'
-                }`}
+                className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${wsStatus === 'connected' ? 'text-arcade-emerald' : 'text-slate-400'
+                  }`}
               >
                 <span
-                  className={`h-2 w-2 rounded-full ${
-                    wsStatus === 'connected' ? 'bg-arcade-emerald' : 'bg-slate-600'
-                  }`}
+                  className={`h-2 w-2 rounded-full ${wsStatus === 'connected' ? 'bg-arcade-emerald' : 'bg-slate-600'
+                    }`}
                   aria-hidden
                 />
                 Gateway {wsStatus === 'connected' ? (connected ? 'Serial OK' : 'en linea') : 'sin senal'}
@@ -235,17 +221,10 @@ export default function AuthPairingRoute() {
           <LedMatrixFaceMock face={ledMatrixFace} />
         </div>
 
-        {/* ------------------------------------------------ */}
-        {/* CASO A: sesion vinculada activa (re-verificacion  */}
-        {/* bloqueada + accion de desconexion)                */}
-        {/* ------------------------------------------------ */}
         {isPaired ? (
           <PairedStatePanel username={username} rfidUid={rfidUid} onDisconnect={handleDisconnect} />
         ) : null}
 
-        {/* ------------------------------------------------ */}
-        {/* CASO B: reconexion con perfiles guardados         */}
-        {/* ------------------------------------------------ */}
         {!isPaired && gateStep === 'CHOOSER' && savedProfiles.length > 0 ? (
           <ProfilePicker
             profiles={savedProfiles}
@@ -254,19 +233,14 @@ export default function AuthPairingRoute() {
           />
         ) : null}
 
-        {/* Alta de perfil nuevo sin contraseña */}
         {!isPaired && (gateStep === 'NEW_USER' || (gateStep === 'CHOOSER' && savedProfiles.length === 0)) ? (
           <NewUserForm onCreate={handleCreateProfile} busy={false} defaultUsername={username ?? ''} />
         ) : null}
 
-        {/* ------------------------------------------------ */}
-        {/* SESION: verificacion en 2 fases (IR -> RFID)      */}
-        {/* ------------------------------------------------ */}
         {!isPaired && gateStep === 'SESSION' ? (
           <>
             <PhaseStepper phase={pairingPhase} />
 
-            {/* FASE 1: PIN via Control Remoto IR */}
             {phase1Active ? (
               <PanelCard tone="yellow" icon={Radio} title="Fase 1 · Codigo IR" className="animate-pop-in">
                 <p className="text-center font-display text-sm font-extrabold uppercase leading-snug tracking-wide">
@@ -298,30 +272,6 @@ export default function AuthPairingRoute() {
                     </ArcadeButton>
                   </>
                 ) : null}
-
-                {/* Teclado de demostracion: simula pulsos del Control IR */}
-                <div className="mt-4 rounded-xl border-[3px] border-ink bg-ink/90 p-3">
-                  <p className="mb-2 flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-arcade-yellow">
-                    <Gamepad2 className="h-4 w-4" aria-hidden />
-                    Teclado IR de demostracion
-                  </p>
-                  <div className="grid grid-cols-5 gap-2">
-                    {KEYPAD_DIGITS.map((digit) => (
-                      <button
-                        key={digit}
-                        type="button"
-                        onClick={() => simulateIrKey(digit)}
-                        aria-label={`Pulso IR digito ${digit}`}
-                        className="flex h-11 min-w-[44px] items-center justify-center rounded-lg border-2 border-arcade-sky-deep bg-arcade-navy font-display text-lg font-extrabold text-white shadow-[2px_2px_0px_#0F172A] transition-all duration-100 active:translate-y-[2px] active:shadow-none"
-                      >
-                        {digit}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-center text-[9px] font-bold uppercase tracking-widest text-slate-400">
-                    Sin Arduino: usa este teclado · Con hardware: apunta el Control IR
-                  </p>
-                </div>
               </PanelCard>
             ) : null}
 
@@ -331,7 +281,6 @@ export default function AuthPairingRoute() {
               </div>
             ) : null}
 
-            {/* FASE 2: Escaneo RFID (solo tras "Codigo correcto") */}
             {phase2Active ? (
               <PanelCard tone="sky" icon={ScanLine} title="Fase 2 · Tarjeta RFID" className="animate-pop-in">
                 <p className="text-center font-display text-sm font-extrabold uppercase leading-snug tracking-wide">
@@ -342,39 +291,12 @@ export default function AuthPairingRoute() {
                   <RfidScanVisual scanning={pairingPhase === 'WAITING_RFID_SCAN'} />
                 </div>
 
-                {pairingPhase === 'WAITING_RFID_SCAN' ? (
-                  <div className="mt-4 rounded-xl border-[3px] border-ink bg-ink/90 p-3">
-                    <p className="mb-2 flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-arcade-yellow">
-                      <Nfc className="h-4 w-4" aria-hidden />
-                      Lector de demostracion
-                    </p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {DEMO_RFID_CARDS.map((uid) => (
-                        <button
-                          key={uid}
-                          type="button"
-                          onClick={() => simulateRfidScan(uid)}
-                          aria-label={`Escanear tarjeta de demostracion ${uid}`}
-                          className="flex min-h-[44px] flex-col items-center justify-center rounded-lg border-2 border-arcade-amber bg-arcade-navy px-1 py-1.5 font-mono text-[10px] font-bold text-white shadow-[2px_2px_0px_#0F172A] transition-all duration-100 active:translate-y-[2px] active:shadow-none"
-                        >
-                          <span className="mb-0.5 h-1.5 w-8 rounded-full bg-arcade-amber/70" aria-hidden />
-                          {uid}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-center text-[9px] font-bold uppercase tracking-widest text-slate-400">
-                      Tarjetas de prueba · Cada perfil usa su propia credencial fisica
-                    </p>
-                  </div>
-                ) : null}
-
                 {duplicateRfidError ? (
                   <DuplicateRfidBanner message={duplicateRfidError} onRetry={() => beginRfidScanPhase()} />
                 ) : null}
               </PanelCard>
             ) : null}
 
-            {/* Vinculacion completada */}
             {pairingDone ? (
               <PanelCard tone="green" icon={Nfc} title="Ingreso correcto" className="animate-pop-in">
                 <div className="flex flex-col items-center gap-2 py-2 text-center">
@@ -391,7 +313,6 @@ export default function AuthPairingRoute() {
               </PanelCard>
             ) : null}
 
-            {/* Estado del gateway y arranque de sesion */}
             {!pairingPin && !loadingPin && pairingPhase === 'IDLE' ? (
               <PanelCard tone="ink" title="Estado del Gateway" className="animate-pop-in">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-300">
