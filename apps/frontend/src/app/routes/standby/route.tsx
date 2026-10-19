@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { LedAvatarSVG } from '../../components/led-avatar-svg';
 import { ArcadeTitle } from '../../components/arcade-title';
+import { sendFaceCommand, sendLcdCommand } from '../../hardware/gateway-client';
 
 /**
  * Pantalla fija de Protector de Pantalla (Standby).
@@ -9,6 +11,11 @@ import { ArcadeTitle } from '../../components/arcade-title';
  */
 export default function StandbyRoute() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    sendLcdCommand('KINESTEM', 'MODO STANDBY');
+    sendFaceCommand('waiting');
+  }, []);
 
   const handleTap = () => {
     navigate('/lobby');

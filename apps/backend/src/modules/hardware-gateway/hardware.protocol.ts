@@ -17,27 +17,49 @@ export class HardwareProtocol {
     const frame = raw.trim();
     if (!frame) return null;
 
-    // 1. Control Infrarrojo (Dígito individual)
+    // 1. Mensaje de arranque del microcontrolador
+    if (/^READY$/i.test(frame)) {
+      return { event: 'READY', data: 'READY', raw: frame };
+    }
+
+    // 2. Control Infrarrojo (Dígito individual)
     const irMatch = frame.match(/^IR:([0-9])$/i);
     if (irMatch && irMatch[1]) {
       return { event: 'IR_DIGIT', data: irMatch[1], raw: frame };
     }
 
-    // 2. Veredicto del PIN evaluado por el Arduino
+    // 3. Veredictos y estados del Arduino Maestro
     if (frame === 'STATUS:PIN_OK') {
       return { event: 'PIN_VALIDATED', data: 'OK', raw: frame };
     }
     if (frame === 'STATUS:PIN_ERROR') {
       return { event: 'PIN_ERROR', data: 'FAIL', raw: frame };
     }
+    const statusMatch = frame.match(/^STATUS:(\w+)$/i);
+    if (statusMatch && statusMatch[1]) {
+      return { event: `STATUS_${statusMatch[1].toUpperCase()}`, data: statusMatch[1].toUpperCase(), raw: frame };
+    }
 
-    // 3. Tarjetas y tags RFID (RC522)
+    // 4. Tarjetas y tags RFID (RC522)
     const rfidMatch = frame.match(/^RFID:(UID_\w+|\w+)$/i);
     if (rfidMatch && rfidMatch[1]) {
       return { event: 'RFID', data: rfidMatch[1], raw: frame };
     }
 
-    // 4. Latido / Eco PONG y ACKs
+    // 5. Botones interactivos (físicos o de control de flujo: BTN:GREEN, BTN:RED, BTN:BLUE)
+    const btnMatch = frame.match(/^BTN:(RED|GREEN|BLUE)$/i);
+    if (btnMatch && btnMatch[1]) {
+      const color = btnMatch[1].toUpperCase();
+      return { event: `BTN:${color}`, data: color, raw: frame };
+    }
+
+    // 6. Conexión de componentes de circuito (prototipado STEM)
+    const compMatch = frame.match(/^COMP:(RESISTOR|CAPACITOR|SENSOR_LDR|LED|WIRE)$/i);
+    if (compMatch && compMatch[1]) {
+      return { event: 'COMPONENT_ATTACHED', data: compMatch[1].toLowerCase(), raw: frame };
+    }
+
+    // 7. Latido / Eco PONG y ACKs
     if (/^PONG$/i.test(frame)) {
       return { event: 'PONG', data: 'PONG', raw: frame };
     }

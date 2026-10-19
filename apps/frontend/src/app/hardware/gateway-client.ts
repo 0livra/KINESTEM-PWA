@@ -101,6 +101,20 @@ function notifyRfidListeners(uid: string): void {
   rfidReadListeners.forEach((listener) => listener(uid));
 }
 
+type HardwareEventListener = (event: string, data: unknown) => void;
+const hardwareEventListeners = new Set<HardwareEventListener>();
+
+export function subscribeHardwareEvents(listener: HardwareEventListener): () => void {
+  hardwareEventListeners.add(listener);
+  return () => {
+    hardwareEventListeners.delete(listener);
+  };
+}
+
+function notifyHardwareEventListeners(event: string, data: unknown): void {
+  hardwareEventListeners.forEach((listener) => listener(event, data));
+}
+
 /* ------------------------------------------------------------------ */
 /* FASE 2: Escaneo RFID + bloqueo anti-duplicados + vinculo backend    */
 /* ------------------------------------------------------------------ */
@@ -176,6 +190,14 @@ export function sendDispenseCommand(): boolean {
   return sendGatewayCommand({ type: 'DISPENSE_TEST' });
 }
 
+export function sendLcdCommand(line1: string, line2 = ''): boolean {
+  return sendGatewayCommand({ type: 'SET_LCD', line1, line2 });
+}
+
+export function sendFaceCommand(face: string): boolean {
+  return sendGatewayCommand({ type: 'SET_FACE', face });
+}
+
 /* ------------------------------------------------------------------ */
 /* Dispatcher de mensajes del gateway                                  */
 /* ------------------------------------------------------------------ */
@@ -210,6 +232,7 @@ export function handleGatewayMessage(msg: ServerWebSocketMessage): void {
 
     case 'HARDWARE_EVENT': {
       s.setLastEvent(msg.event, msg.data);
+      notifyHardwareEventListeners(msg.event, msg.data);
       if (msg.event === 'RFID') {
         void processRfidUid(String(msg.data));
       } else if (msg.event === 'IR_DIGIT') {

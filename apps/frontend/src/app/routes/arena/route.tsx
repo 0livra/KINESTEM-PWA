@@ -9,6 +9,7 @@ import { GridMatrix, CELL_SIZE } from '../../../engine/core/grid-matrix';
 import { ElectronicComponentNode } from '../../../engine/nodes/ElectronicComponentNode';
 import { ComponentVisualState } from '../../../engine/core/circuit-types';
 import { ArenaHud } from './arena-hud';
+import { sendFaceCommand, sendLcdCommand, subscribeHardwareEvents } from '../../hardware/gateway-client';
 
 const CANVAS_WIDTH = 360;
 const CANVAS_HEIGHT = 420;
@@ -32,6 +33,11 @@ export default function ArenaRoute() {
   }));
 
   const [timerSeconds, setTimerSeconds] = useState(ROUND_SECONDS);
+
+  useEffect(() => {
+    sendLcdCommand(`RONDA ${ronda}`, `VIDAS: ${vidasRestantes}`);
+    sendFaceCommand('waiting');
+  }, [ronda, vidasRestantes]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -104,14 +110,29 @@ export default function ArenaRoute() {
       if (state === 'fail') {
         decrementLives();
         setTimerSeconds(ROUND_SECONDS);
+        sendLcdCommand('ERROR EN CIRCUITO', 'PIERDES 1 VIDA');
+        sendFaceCommand('error');
       } else if (state === 'success') {
         updateSaldo(50);
         advanceRound();
         setTimerSeconds(ROUND_SECONDS);
+        sendLcdCommand('CIRCUITO OK', '+50 PUNTOS');
+        sendFaceCommand('happy');
       }
     },
     [advanceRound, decrementLives, updateSaldo]
   );
+
+  useEffect(() => {
+    const unsubscribe = subscribeHardwareEvents((event) => {
+      if (event === 'BTN:GREEN' || event === 'COMPONENT_ATTACHED') {
+        handleTriggerState('success');
+      } else if (event === 'BTN:RED') {
+        handleTriggerState('fail');
+      }
+    });
+    return unsubscribe;
+  }, [handleTriggerState]);
 
   return (
     <div className="min-h-dvh bg-halftone-ink bg-fixed">

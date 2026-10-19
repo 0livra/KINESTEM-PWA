@@ -29,9 +29,9 @@ const envSchema = z.object({
   RATE_LIMIT_REFILL_RATE_PER_MS: z.coerce.number().positive().default(0.1),
 
   // Hardware
-  SERIAL_PORT: z.string().default('COM3'),
-  BAUD_RATE: z.coerce.number().int().positive().default(9600),
-  USE_MOCK_SERIAL: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(true),
+  SERIAL_PORT: z.string().default('COM6'),
+  BAUD_RATE: z.coerce.number().int().positive().default(Number(process.env['SERIAL_BAUD_RATE'] ?? 9600)),
+  USE_MOCK_SERIAL: z.preprocess((v) => process.env['SERIAL_MOCK'] === 'true' || v === 'true' || v === true, z.boolean()).default(false),
 });
 
 const parseResult = envSchema.safeParse(process.env);

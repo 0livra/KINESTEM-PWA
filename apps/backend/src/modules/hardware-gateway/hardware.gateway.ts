@@ -95,6 +95,18 @@ export class HardwareGateway {
         break;
       }
 
+      case 'SET_LCD': {
+        const cmd = HardwareProtocol.formatLcdCommand(msg.line1, msg.line2 ?? '');
+        this.serial.sendCommand(cmd);
+        break;
+      }
+
+      case 'SET_FACE': {
+        const cmd = HardwareProtocol.formatFaceCommand(msg.face);
+        this.serial.sendCommand(cmd);
+        break;
+      }
+
       case 'GET_STATUS': {
         const statusMsg: ServerWebSocketMessage = {
           type: 'STATUS',

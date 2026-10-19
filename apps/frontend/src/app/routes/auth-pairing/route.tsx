@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLoaderData, useNavigate } from 'react-router';
-import { Delete, Gamepad2, Nfc, Radio, ScanLine } from 'lucide-react';
+import { Delete, Nfc, Radio, ScanLine } from 'lucide-react';
 import { ConsoleTopBar } from '../../components/console-top-bar';
 import { ArcadeButton } from '../../components/arcade-button';
 import { PanelCard } from '../../components/panel-card';
@@ -8,6 +8,10 @@ import { useHardwareStore, useMatchStore, useUserStore } from '../../../store';
 import {
   announcePinAcceptedToGateway,
   registerNewUser,
+  sendFaceCommand,
+  sendGatewayCommand,
+  sendLcdCommand,
+  subscribeHardwareEvents,
   syncMatchParticipants,
 } from '../../hardware/gateway-client';
 import type { SavedProfile } from '../../../store/user.slice';
@@ -39,11 +43,10 @@ export default function AuthPairingRoute() {
   const data = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
 
-  const { userId, username, avatarId, saldoPuntos, rfidUid, isPaired, savedProfiles, setUser, adoptSavedProfile, disconnectCurrentUser } =
+  const { userId, username, saldoPuntos, rfidUid, isPaired, savedProfiles, setUser, adoptSavedProfile, disconnectCurrentUser } =
     useUserStore((s) => ({
       userId: s.userId,
       username: s.username,
-      avatarId: s.avatarId,
       saldoPuntos: s.saldoPuntos,
       rfidUid: s.rfidUid,
       isPaired: s.isPaired,
@@ -136,10 +139,12 @@ export default function AuthPairingRoute() {
       const finalPin = pin ?? Math.floor(1000 + Math.random() * 9000).toString();
       setUser({ pinTemporal: finalPin });
       startPairingSession(finalPin);
+      sendGatewayCommand({ type: 'SUBMIT_PIN', pin: finalPin });
     } catch {
       const mockPin = Math.floor(1000 + Math.random() * 9000).toString();
       setUser({ pinTemporal: mockPin });
       startPairingSession(mockPin);
+      sendGatewayCommand({ type: 'SUBMIT_PIN', pin: mockPin });
     } finally {
       setLoadingPin(false);
     }
@@ -165,12 +170,28 @@ export default function AuthPairingRoute() {
     disconnectCurrentUser();
     resetPairing();
     setGateStep('CHOOSER');
+    sendLcdCommand('EN ESPERA', 'CONECTA LA WEB');
+    sendFaceCommand('waiting');
   }, [disconnectCurrentUser, resetPairing]);
 
   useEffect(() => {
     if (pairingPhase === 'IR_CODE_CORRECT') {
       announcePinAcceptedToGateway();
+      sendLcdCommand('CODIGO CORRECTO', 'ESPERA RFID...');
+      sendFaceCommand('happy');
       advanceTimer.current = setTimeout(() => beginRfidScanPhase(), 1500);
+    } else if (pairingPhase === 'WAITING_RFID_SCAN') {
+      sendLcdCommand('APROXIMA TARJETA', 'LECTOR RC522');
+      sendFaceCommand('waiting');
+    } else if (pairingPhase === 'RFID_DUPLICATED') {
+      sendLcdCommand('TARJETA YA EN', 'PARTIDA ACTIVA');
+      sendFaceCommand('error');
+    } else if (pairingPhase === 'PAIRING_COMPLETE') {
+      sendLcdCommand('INGRESO CORRECTO', 'A JUGAR!');
+      sendFaceCommand('cheer');
+      if (rfidUid) {
+        advanceTimer.current = setTimeout(() => navigate('/lobby'), 2200);
+      }
     }
     return () => {
       if (advanceTimer.current) {
@@ -178,13 +199,26 @@ export default function AuthPairingRoute() {
         advanceTimer.current = null;
       }
     };
-  }, [pairingPhase, beginRfidScanPhase]);
+  }, [pairingPhase, beginRfidScanPhase, navigate, rfidUid]);
 
   useEffect(() => {
-    if (pairingPhase === 'PAIRING_COMPLETE' && rfidUid) {
-      advanceTimer.current = setTimeout(() => navigate('/lobby'), 2200);
-    }
-  }, [pairingPhase, rfidUid, navigate, username, userId, setUser, saldoPuntos, avatarId]);
+    const unsubscribe = subscribeHardwareEvents((event) => {
+      if (event === 'BTN:GREEN') {
+        if (!pairingPin && !loadingPin && pairingPhase === 'IDLE' && gateStep === 'SESSION') {
+          void handleGeneratePin();
+        } else if (pairingPhase === 'IR_CODE_INCORRECT') {
+          retryIrCode();
+          if (pairingPin) sendGatewayCommand({ type: 'SUBMIT_PIN', pin: pairingPin });
+        }
+      } else if (event === 'BTN:RED') {
+        if (pairingPhase === 'IR_CODE_INCORRECT') {
+          retryIrCode();
+          if (pairingPin) sendGatewayCommand({ type: 'SUBMIT_PIN', pin: pairingPin });
+        }
+      }
+    });
+    return unsubscribe;
+  }, [gateStep, handleGeneratePin, loadingPin, pairingPhase, pairingPin, retryIrCode]);
 
   const phase1Active = pairingPhase === 'WAITING_IR_CODE' || pairingPhase === 'IR_CODE_INCORRECT';
   const phase2Active = pairingPhase === 'WAITING_RFID_SCAN' || pairingPhase === 'RFID_DUPLICATED';
@@ -267,7 +301,17 @@ export default function AuthPairingRoute() {
                     <p className="mt-2 text-center text-[11px] font-bold uppercase tracking-wider text-ink/80">
                       Intento fallido numero {irAttempts}
                     </p>
-                    <ArcadeButton variant="dark" size="md" icon={Delete} block className="mt-3" onClick={retryIrCode}>
+                    <ArcadeButton
+                      variant="dark"
+                      size="md"
+                      icon={Delete}
+                      block
+                      className="mt-3"
+                      onClick={() => {
+                        retryIrCode();
+                        if (pairingPin) sendGatewayCommand({ type: 'SUBMIT_PIN', pin: pairingPin });
+                      }}
+                    >
                       Borrar e intentar de nuevo
                     </ArcadeButton>
                   </>

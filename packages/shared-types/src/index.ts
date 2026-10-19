@@ -238,6 +238,8 @@ export type ClientWebSocketMessage =
   | { type: 'PING_ARDUINO' }
   | { type: 'DISPENSE_TEST' }
   | { type: 'SUBMIT_PIN'; pin: string }
+  | { type: 'SET_LCD'; line1: string; line2?: string }
+  | { type: 'SET_FACE'; face: string }
   | { type: 'GET_STATUS' }
   | {
       type: 'PLAYER_ACTION';

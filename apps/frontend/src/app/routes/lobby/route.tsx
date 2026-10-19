@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useLoaderData, useNavigate } from 'react-router';
 import { Info, Play, Users } from 'lucide-react';
 import { ConsoleTopBar } from '../../components/console-top-bar';
@@ -7,6 +8,7 @@ import { ChipMascot } from '../../components/led-mascot';
 import { useMatchStore, useUserStore } from '../../../store';
 import { PlayerCard } from './lobby-components';
 import type { ParticipantItem } from './lobby-components';
+import { sendFaceCommand, sendLcdCommand, subscribeHardwareEvents } from '../../hardware/gateway-client';
 
 export async function clientLoader() {
   // Carga concurrente de la partida y el estado del gateway (sin cascadas)
@@ -57,7 +59,21 @@ export default function LobbyRoute() {
     disconnectCurrentUser: s.disconnectCurrentUser,
   }));
 
+  useEffect(() => {
+    sendLcdCommand('SALA DE ESPERA', data.codigoSala);
+    sendFaceCommand('happy');
+
+    const unsubscribe = subscribeHardwareEvents((event) => {
+      if (event === 'BTN:GREEN') {
+        handleStartArena();
+      }
+    });
+    return unsubscribe;
+  }, [data.codigoSala]);
+
   const handleStartArena = () => {
+    sendLcdCommand('PARTIDA INICIADA', 'A JUGAR!');
+    sendFaceCommand('cheer');
     setMatch({
       matchId: data.matchId,
       codigoSala: data.codigoSala,
@@ -71,6 +87,8 @@ export default function LobbyRoute() {
 
   const handleBack = () => {
     disconnectCurrentUser();
+    sendLcdCommand('EN ESPERA', 'CONECTA LA WEB');
+    sendFaceCommand('waiting');
     navigate('/standby');
   };
 

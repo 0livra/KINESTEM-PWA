@@ -7,6 +7,7 @@ import { FolderModeCard } from '../../components/folder-mode-card';
 import { CapacitorMascot, ChipMascot, GiftBoxMascot, LedMascot } from '../../components/led-mascot';
 import { DiamondSparkle, FourPointStar, MiniHeartSparkle } from '../../components/sparkles';
 import { useHardwareStore, useUserStore } from '../../../store';
+import { sendFaceCommand, sendLcdCommand } from '../../hardware/gateway-client';
 
 interface ModeCardConfig {
   id: string;
@@ -120,6 +121,11 @@ export default function MainMenuRoute() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    sendLcdCommand('KINESTEM ARCADE', stationReady ? (stationName ?? 'BIENVENIDO') : 'CONECTA LA WEB');
+    sendFaceCommand(stationReady ? 'happy' : 'waiting');
+  }, [stationReady, stationName]);
 
   useEffect(() => {
     if (!hint) return;
