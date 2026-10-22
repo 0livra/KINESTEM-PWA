@@ -7,7 +7,14 @@ import { PanelCard } from '../../components/panel-card';
 import { GiftBoxMascot, LedMascot } from '../../components/led-mascot';
 import { FourPointStar } from '../../components/sparkles';
 import { useHardwareStore, useUserStore } from '../../../store';
-import { sendDispenseCommand, sendFaceCommand, sendLcdCommand, simulateRfidRead, subscribeRfidReads } from '../../hardware/gateway-client';
+import {
+  sendDispenseCommand,
+  sendFaceCommand,
+  sendLcdCommand,
+  sendStationMode,
+  simulateRfidRead,
+  subscribeRfidReads,
+} from '../../hardware/gateway-client';
 import { AsymmetricRoulette, ROULETTE_SECTORS, TOTAL_WEIGHT } from './asymmetric-roulette';
 import type { Sector } from './asymmetric-roulette';
 
@@ -119,6 +126,7 @@ export default function RewardsShopRoute() {
    */
   useEffect(() => {
     if (spinPhase !== 'WAITING_WINNER_RFID_CONFIRMATION') return;
+    sendStationMode('RFID');
     sendLcdCommand('PREMIO MAYOR!', 'ACERCA TU TAG');
     sendFaceCommand('cheer');
     const unsubscribe = subscribeRfidReads((uid) => {
@@ -133,6 +141,7 @@ export default function RewardsShopRoute() {
         setRfidMismatch(true);
         sendLcdCommand('TAG INCORRECTO', 'NO ERES GANADOR');
         sendFaceCommand('error');
+        sendStationMode('RFID');
       }
     });
     return unsubscribe;
