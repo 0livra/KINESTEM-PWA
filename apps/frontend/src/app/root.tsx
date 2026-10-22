@@ -1,4 +1,4 @@
-import { Outlet, isRouteErrorResponse } from 'react-router';
+import { Outlet, isRouteErrorResponse, useRouteError } from 'react-router';
 import { TriangleAlert } from 'lucide-react';
 import { BottomStatusBar } from './components/bottom-status-bar';
 import { ArcadeButton } from './components/arcade-button';
@@ -41,9 +41,19 @@ export function ErrorBoundary({ error }: { error: unknown }) {
         <ArcadeButton variant="yellow" block className="mt-4" onClick={() => window.location.reload()}>
           Reintentar conexion
         </ArcadeButton>
+        <ArcadeButton variant="dark" block className="mt-3" onClick={() => window.location.assign('/')}>
+          Volver al menu
+        </ArcadeButton>
       </div>
     </div>
   );
+}
+
+/** errorElement del router: muestra el error real de la ruta en lugar de un mensaje fijo. */
+export function RouteErrorBoundary() {
+  const error = useRouteError();
+  console.error('[Router] Error en ruta:', error);
+  return <ErrorBoundary error={error} />;
 }
 
 export default function RootLayout() {

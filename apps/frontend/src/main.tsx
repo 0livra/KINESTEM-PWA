@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, RouterProvider } from 'react-router';
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
 
 // Tipografía arcade (display chunky + UI legible)
 import '@fontsource/baloo-2/400.css';
@@ -15,11 +15,12 @@ import '@fontsource/nunito/800.css';
 // Sistema de diseño global (tokens arcade, halftone, animaciones)
 import './app/styles/global.css';
 
-import RootLayout, { HydrateFallback, ErrorBoundary } from './app/root';
+import RootLayout, { HydrateFallback, RouteErrorBoundary } from './app/root';
 import MainMenuRoute from './app/routes/main-menu/route';
 import AuthPairingRoute, { clientLoader as authLoader } from './app/routes/auth-pairing/route';
 import LobbyRoute, { clientLoader as lobbyLoader } from './app/routes/lobby/route';
 import ArenaRoute from './app/routes/arena/route';
+import StandbyRoute from './app/routes/standby/route';
 import RewardsShopRoute, { clientLoader as shopLoader } from './app/routes/rewards-shop/route';
 import AnalyticsRoute, { clientLoader as analyticsLoader } from './app/routes/analytics/route';
 
@@ -28,7 +29,7 @@ const router = createBrowserRouter([
     path: '/',
     element: <RootLayout />,
     HydrateFallback: HydrateFallback,
-    errorElement: <ErrorBoundary error={new Error('Error en aplicacion')} />,
+    errorElement: <RouteErrorBoundary />,
     children: [
       {
         index: true,
@@ -47,6 +48,14 @@ const router = createBrowserRouter([
       {
         path: 'arena',
         element: <ArenaRoute />,
+      },
+      {
+        path: 'standby',
+        element: <StandbyRoute />,
+      },
+      {
+        path: '*',
+        element: <Navigate to="/" replace />,
       },
       {
         path: 'rewards-shop',
