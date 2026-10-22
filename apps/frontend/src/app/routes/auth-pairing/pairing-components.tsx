@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { AlertOctagon, Check, LogOut, PlusCircle, RotateCcw, ScanLine, UserRound, X } from 'lucide-react';
@@ -115,6 +115,54 @@ export function PinDigitTiles({ pin, tone = 'lcd' }: { pin: string | null; tone?
           </span>
         )
       )}
+    </div>
+  );
+}
+
+/**
+ * Recuadro de dígitos capturados: al hacer clic recibe el foco y cada número
+ * tecleado se envía como si viniera del control IR.
+ */
+export function IrDigitCaptureInput({
+  digits,
+  onDigit,
+}: {
+  digits: string;
+  onDigit: (digit: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <div
+      role="button"
+      tabIndex={-1}
+      onClick={() => inputRef.current?.focus()}
+      className={`cursor-text rounded-xl border-[3px] bg-ink/90 p-3 transition-shadow ${
+        focused ? 'border-arcade-sky shadow-[0_0_0_3px_rgba(56,189,248,0.45)]' : 'border-ink'
+      }`}
+    >
+      <p className="mb-2 text-center text-[10px] font-bold uppercase tracking-widest text-arcade-sky">
+        Digitos capturados por el sensor IR
+      </p>
+      <PinDigitTiles pin={digits} tone="ir" />
+      <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-widest text-slate-300">
+        {focused ? 'Escribe los digitos con tu teclado' : 'Haz clic aqui para escribir con el teclado'}
+      </p>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        aria-label="Ingresar digitos del PIN"
+        className="sr-only"
+        value=""
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(ev) => {
+          ev.target.value.replace(/\D/g, '').split('').forEach(onDigit);
+        }}
+      />
     </div>
   );
 }

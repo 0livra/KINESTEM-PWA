@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLoaderData, useNavigate } from 'react-router';
-import { Delete, Nfc, Radio, ScanLine } from 'lucide-react';
+import { Check, Delete, Nfc, Radio, ScanLine, SkipForward } from 'lucide-react';
 import { ConsoleTopBar } from '../../components/console-top-bar';
 import { ArcadeButton } from '../../components/arcade-button';
 import { PanelCard } from '../../components/panel-card';
 import { useHardwareStore, useMatchStore, useUserStore } from '../../../store';
 import {
-  announcePinAcceptedToGateway,
   registerNewUser,
-  sendFaceCommand,
   sendGatewayCommand,
   sendLcdCommand,
+  sendStationMode,
+  simulateRfidScan,
+  submitManualDigit,
   subscribeHardwareEvents,
   syncMatchParticipants,
 } from '../../hardware/gateway-client';
 import type { SavedProfile } from '../../../store/user.slice';
 import {
   DuplicateRfidBanner,
+  IrDigitCaptureInput,
   IrPulseLed,
   IrVerdictFeedback,
   LcdMock,
@@ -39,11 +41,25 @@ export async function clientLoader() {
 
 type GateStep = 'CHOOSER' | 'NEW_USER' | 'SESSION';
 
+/** El control IR de la estación solo responde a la tecla 5. */
+const FIXED_PAIRING_PIN = '5555';
+
 export default function AuthPairingRoute() {
   const data = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
 
-  const { userId, username, saldoPuntos, rfidUid, isPaired, savedProfiles, setUser, adoptSavedProfile, disconnectCurrentUser } =
+  const {
+    userId,
+    username,
+    saldoPuntos,
+    rfidUid,
+    isPaired,
+    savedProfiles,
+    setUser,
+    adoptSavedProfile,
+    disconnectCurrentUser,
+    persistCurrentProfile,
+  } =
     useUserStore((s) => ({
       userId: s.userId,
       username: s.username,
@@ -54,6 +70,7 @@ export default function AuthPairingRoute() {
       setUser: s.setUser,
       adoptSavedProfile: s.adoptSavedProfile,
       disconnectCurrentUser: s.disconnectCurrentUser,
+      persistCurrentProfile: s.persistCurrentProfile,
     }));
 
   const {
@@ -71,6 +88,9 @@ export default function AuthPairingRoute() {
     beginRfidScanPhase,
     retryIrCode,
     resetPairing,
+    setIrCodeStatus,
+    setLastEvent,
+    completePairing,
   } = useHardwareStore((s) => ({
     pairingPhase: s.pairingPhase,
     pairingPin: s.pairingPin,
@@ -86,6 +106,9 @@ export default function AuthPairingRoute() {
     beginRfidScanPhase: s.beginRfidScanPhase,
     retryIrCode: s.retryIrCode,
     resetPairing: s.resetPairing,
+    setIrCodeStatus: s.setIrCodeStatus,
+    setLastEvent: s.setLastEvent,
+    completePairing: s.completePairing,
   }));
 
   const { matchId, setMatch } = useMatchStore((s) => ({
@@ -108,8 +131,14 @@ export default function AuthPairingRoute() {
         const created = await fetch('/api/v1/matches', { method: 'POST' }).then((r) => r.json()).catch(() => null);
         match = created?.data ?? null;
       }
-      if (!cancelled && match?.id) {
-        setMatch({ matchId: match.id, codigoSala: match.codigo_sala ?? 'LOCAL-DEMO', estadoPartida: 'lobby' });
+      // El backend expone la partida como match_id (PartidaEntity)
+      const resolvedId = Number(match?.match_id ?? match?.id ?? 0);
+      if (!cancelled && resolvedId > 0) {
+        setMatch({
+          matchId: resolvedId,
+          codigoSala: match.codigo_sala ?? `KINE-${String(resolvedId).padStart(3, '0')}`,
+          estadoPartida: 'lobby',
+        });
         syncMatchParticipants(match);
       }
     };
@@ -136,15 +165,14 @@ export default function AuthPairingRoute() {
       });
       const json = await res.json();
       const pin: string | undefined = json?.data?.pin ?? json?.pin;
-      const finalPin = pin ?? Math.floor(1000 + Math.random() * 9000).toString();
+      const finalPin = pin ?? FIXED_PAIRING_PIN;
       setUser({ pinTemporal: finalPin });
       startPairingSession(finalPin);
       sendGatewayCommand({ type: 'SUBMIT_PIN', pin: finalPin });
     } catch {
-      const mockPin = Math.floor(1000 + Math.random() * 9000).toString();
-      setUser({ pinTemporal: mockPin });
-      startPairingSession(mockPin);
-      sendGatewayCommand({ type: 'SUBMIT_PIN', pin: mockPin });
+      setUser({ pinTemporal: FIXED_PAIRING_PIN });
+      startPairingSession(FIXED_PAIRING_PIN);
+      sendGatewayCommand({ type: 'SUBMIT_PIN', pin: FIXED_PAIRING_PIN });
     } finally {
       setLoadingPin(false);
     }
@@ -166,29 +194,52 @@ export default function AuthPairingRoute() {
     [adoptSavedProfile]
   );
 
+  // Fase IR omitida: se toma como código correcto; la Fase 2 envía MODE:RFID y el
+  // backend sigue validando la tarjeta con el PIN fijo de la sesión.
+  const handleSkipIrPhase = useCallback(() => {
+    setLastEvent('IR_PHASE_SKIPPED', pairingPin);
+    setIrCodeStatus('correct');
+  }, [pairingPin, setIrCodeStatus, setLastEvent]);
+
+  // UID estable por perfil para que los atajos de la Fase 2 no choquen entre jugadores
+  const webRfidUid = rfidUid ?? `UID_WEB${String(userId ?? Date.now()).slice(-6).padStart(6, '0')}`;
+
+  // "Carta reconocida": cierra la Fase 2 en la web sin pasar por el lector ni el backend
+  const handleCardRecognized = useCallback(() => {
+    setLastEvent('RFID_PHASE_SKIPPED', webRfidUid);
+    sendStationMode('IDLE');
+    setUser({ rfidUid: webRfidUid, isPaired: true });
+    completePairing(username ?? 'JUGADOR', webRfidUid);
+    persistCurrentProfile();
+  }, [completePairing, persistCurrentProfile, setLastEvent, setUser, username, webRfidUid]);
+
+  // Lectura simulada: mismo camino que una trama RFID real (vinculo backend + anti-duplicados)
+  const handleSimulateCardRead = useCallback(() => {
+    sendStationMode('IDLE');
+    simulateRfidScan(webRfidUid);
+  }, [webRfidUid]);
+
   const handleDisconnect = useCallback(() => {
     disconnectCurrentUser();
     resetPairing();
     setGateStep('CHOOSER');
     sendLcdCommand('EN ESPERA', 'CONECTA LA WEB');
-    sendFaceCommand('waiting');
   }, [disconnectCurrentUser, resetPairing]);
 
+  // La matriz 8x8 física se sincroniza sola con ledMatrixFace (installLedMatrixMirror)
   useEffect(() => {
-    if (pairingPhase === 'IR_CODE_CORRECT') {
-      announcePinAcceptedToGateway();
+    if (pairingPhase === 'IR_CODE_INCORRECT') {
+      sendLcdCommand('CODIGO ERRONEO', 'REINTENTA PIN');
+    } else if (pairingPhase === 'IR_CODE_CORRECT') {
       sendLcdCommand('CODIGO CORRECTO', 'ESPERA RFID...');
-      sendFaceCommand('happy');
       advanceTimer.current = setTimeout(() => beginRfidScanPhase(), 1500);
     } else if (pairingPhase === 'WAITING_RFID_SCAN') {
+      sendStationMode('RFID');
       sendLcdCommand('APROXIMA TARJETA', 'LECTOR RC522');
-      sendFaceCommand('waiting');
     } else if (pairingPhase === 'RFID_DUPLICATED') {
       sendLcdCommand('TARJETA YA EN', 'PARTIDA ACTIVA');
-      sendFaceCommand('error');
     } else if (pairingPhase === 'PAIRING_COMPLETE') {
       sendLcdCommand('INGRESO CORRECTO', 'A JUGAR!');
-      sendFaceCommand('cheer');
       if (rfidUid) {
         advanceTimer.current = setTimeout(() => navigate('/lobby'), 2200);
       }
@@ -280,6 +331,9 @@ export default function AuthPairingRoute() {
                 <p className="text-center font-display text-sm font-extrabold uppercase leading-snug tracking-wide">
                   Ingresa el codigo con el Control IR apuntando a la consola
                 </p>
+                <p className="mt-1 text-center text-[11px] font-bold uppercase tracking-wider text-ink/80">
+                  Presiona 4 veces cualquier boton del control o teclea {pairingPin ?? FIXED_PAIRING_PIN}
+                </p>
 
                 <div className="mt-4">
                   <PinDigitTiles pin={pairingPin} tone="lcd" />
@@ -288,11 +342,8 @@ export default function AuthPairingRoute() {
                   </p>
                 </div>
 
-                <div className="mt-4 rounded-xl border-[3px] border-ink bg-ink/90 p-3">
-                  <p className="mb-2 text-center text-[10px] font-bold uppercase tracking-widest text-arcade-sky">
-                    Digitos capturados por el sensor IR
-                  </p>
-                  <PinDigitTiles pin={irDigits.join('')} tone="ir" />
+                <div className="mt-4">
+                  <IrDigitCaptureInput digits={irDigits.join('')} onDigit={submitManualDigit} />
                 </div>
 
                 {pairingPhase === 'IR_CODE_INCORRECT' ? (
@@ -316,6 +367,20 @@ export default function AuthPairingRoute() {
                     </ArcadeButton>
                   </>
                 ) : null}
+
+                <ArcadeButton
+                  variant="dark"
+                  size="md"
+                  icon={SkipForward}
+                  block
+                  className="mt-4"
+                  onClick={handleSkipIrPhase}
+                >
+                  Saltar fase IR
+                </ArcadeButton>
+                <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-widest text-ink/60">
+                  Si el control no responde, continua directo a la tarjeta RFID
+                </p>
               </PanelCard>
             ) : null}
 
@@ -338,6 +403,18 @@ export default function AuthPairingRoute() {
                 {duplicateRfidError ? (
                   <DuplicateRfidBanner message={duplicateRfidError} onRetry={() => beginRfidScanPhase()} />
                 ) : null}
+
+                <div className="mt-4 grid grid-cols-1 gap-3">
+                  <ArcadeButton variant="green" size="md" icon={Check} block onClick={handleCardRecognized}>
+                    Carta reconocida
+                  </ArcadeButton>
+                  <ArcadeButton variant="dark" size="md" icon={Nfc} block onClick={handleSimulateCardRead}>
+                    Simular lectura de tarjeta
+                  </ArcadeButton>
+                </div>
+                <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-widest text-ink/60">
+                  Usa estos botones si el lector RC522 no responde
+                </p>
               </PanelCard>
             ) : null}
 
