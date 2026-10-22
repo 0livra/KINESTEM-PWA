@@ -5,45 +5,76 @@ import { ConsoleTopBar } from '../../components/console-top-bar';
 import { ArcadeButton } from '../../components/arcade-button';
 import { PanelCard } from '../../components/panel-card';
 import { ChipMascot } from '../../components/led-mascot';
-import { useMatchStore, useUserStore } from '../../../store';
+import { useAppStore, useMatchStore, useUserStore } from '../../../store';
 import { PlayerCard } from './lobby-components';
 import type { ParticipantItem } from './lobby-components';
-import { sendFaceCommand, sendLcdCommand, subscribeHardwareEvents } from '../../hardware/gateway-client';
+import { sendFaceCommand, sendLcdCommand, sendStationMode, subscribeHardwareEvents } from '../../hardware/gateway-client';
+
+const SURVIVAL_LIVES = 3;
+
+async function fetchJsonOrNull(url: string, init?: RequestInit): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(url, init);
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function matchIdOf(match: Record<string, unknown> | null): number {
+  return Number(match?.['match_id'] ?? match?.['id'] ?? 0);
+}
+
+/**
+ * Partida de la sala: la del store (vinculación) si sigue abierta; si no, la activa
+ * del backend o una nueva. Sin backend se juega en local con la partida del store.
+ */
+async function resolveLobbyMatch(): Promise<Record<string, unknown> | null> {
+  const storeMatchId = useAppStore.getState().matchId;
+  if (storeMatchId) {
+    const current = (await fetchJsonOrNull(`/api/v1/matches/${storeMatchId}`))?.['data'] as Record<string, unknown> | undefined;
+    if (current && current['estado'] !== 'finalizada') return current;
+  }
+  const active = (await fetchJsonOrNull('/api/v1/matches/active'))?.['data'] as Record<string, unknown> | undefined;
+  const base =
+    active ??
+    ((await fetchJsonOrNull('/api/v1/matches', { method: 'POST' }))?.['data'] as Record<string, unknown> | undefined);
+  if (!base) return null;
+  const withParticipants = (await fetchJsonOrNull(`/api/v1/matches/${matchIdOf(base)}`))?.['data'];
+  return (withParticipants as Record<string, unknown> | undefined) ?? base;
+}
 
 export async function clientLoader() {
-  // Carga concurrente de la partida y el estado del gateway (sin cascadas)
-  const [matchConfigRes, statusRes] = await Promise.all([
-    fetch('/api/v1/matches/1').then((r) => r.json()).catch(() => ({
-      data: { id: 1, codigo_sala: 'KINE-STEM-01', ronda_actual: 1, vidas_iniciales: 3 },
-    })),
-    fetch('/api/v1/health').then((r) => r.json()).catch(() => ({ status: 'offline' })),
+  const [match, statusRes] = await Promise.all([
+    resolveLobbyMatch(),
+    fetchJsonOrNull('/api/v1/health').then((r) => r ?? { status: 'offline' }),
   ]);
 
-  const matchData = (matchConfigRes.data as Record<string, unknown>) ?? {};
-  const rawParticipants = Array.isArray(matchData['participantes'])
-    ? (matchData['participantes'] as Record<string, unknown>[])
+  const s = useAppStore.getState();
+  const matchId = matchIdOf(match) || s.matchId || 0;
+  const rawParticipants = Array.isArray(match?.['participantes'])
+    ? (match['participantes'] as Record<string, unknown>[])
     : [];
 
-  const defaultPlayers: ParticipantItem[] = [
-    { id: 1, username: 'Estudiante Alpha', rfidUid: 'UID_8F3A21', vidas: 3, ready: true },
-    { id: 2, username: 'Estudiante Beta', rfidUid: 'UID_55B7C0', vidas: 3, ready: true },
-  ];
-
-  const players: ParticipantItem[] =
-    rawParticipants.length > 0
-      ? rawParticipants.map((p, idx) => ({
-          id: Number(p['user_id'] ?? idx + 1),
-          username: String(p['username'] ?? `Jugador ${idx + 1}`),
-          rfidUid: typeof p['rfid_uid'] === 'string' ? p['rfid_uid'] : null,
-          vidas: Number(p['vidas_restantes'] ?? 3),
-          ready: true,
-        }))
-      : defaultPlayers;
+  const players: ParticipantItem[] = rawParticipants.map((p, idx) => ({
+    id: Number(p['user_id'] ?? idx + 1),
+    username: String(p['username'] ?? `Jugador ${idx + 1}`),
+    rfidUid: typeof p['rfid_uid'] === 'string' ? p['rfid_uid'] : null,
+    vidas: SURVIVAL_LIVES,
+    ready: true,
+  }));
+  // Jugador local siempre visible aunque el backend no lo tenga admitido
+  if (s.username && !players.some((p) => p.id === s.userId || (s.rfidUid && p.rfidUid === s.rfidUid))) {
+    players.unshift({ id: s.userId ?? 0, username: s.username, rfidUid: s.rfidUid, vidas: SURVIVAL_LIVES, ready: true });
+  }
 
   return {
-    matchId: Number(matchData['id'] ?? 1),
-    codigoSala: String(matchData['codigo_sala'] ?? 'KINE-STEM-01'),
-    vidasIniciales: Number(matchData['vidas_iniciales'] ?? 3),
+    matchId,
+    codigoSala: String(
+      match?.['codigo_sala'] ?? s.codigoSala ?? (matchId ? `KINE-${String(matchId).padStart(3, '0')}` : 'LOCAL-DEMO')
+    ),
+    vidasIniciales: SURVIVAL_LIVES,
     systemStatus: statusRes,
     players,
   };
@@ -60,28 +91,37 @@ export default function LobbyRoute() {
   }));
 
   useEffect(() => {
-    sendLcdCommand('SALA DE ESPERA', data.codigoSala);
+    sendStationMode('GAME');
+    sendLcdCommand('SALA DE ESPERA', 'PULSA PARA JUGAR');
     sendFaceCommand('happy');
 
-    const unsubscribe = subscribeHardwareEvents((event) => {
-      if (event === 'BTN:GREEN') {
+    const unsubscribe = subscribeHardwareEvents((event, eventData) => {
+      if (event === 'BTN:GREEN' || (event === 'IR_DIGIT' && String(eventData) === '5')) {
         handleStartArena();
       }
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      sendStationMode('IDLE');
+    };
   }, [data.codigoSala]);
 
   const handleStartArena = () => {
     sendLcdCommand('PARTIDA INICIADA', 'A JUGAR!');
     sendFaceCommand('cheer');
     setMatch({
-      matchId: data.matchId,
+      matchId: data.matchId || null,
       codigoSala: data.codigoSala,
       estadoPartida: 'in_progress',
       ronda: 1,
       vidasRestantes: data.vidasIniciales,
       eliminado: false,
+      puntuacion: 0,
     });
+    // Solo las partidas 'creada' pueden iniciarse; si ya está en curso el backend responde 400
+    if (data.matchId) {
+      void fetch(`/api/v1/matches/${data.matchId}/start`, { method: 'POST' }).catch(() => null);
+    }
     navigate('/arena');
   };
 
@@ -147,6 +187,11 @@ export default function LobbyRoute() {
             {data.players.map((player) => (
               <PlayerCard key={player.id} player={player} />
             ))}
+            {data.players.length === 0 ? (
+              <p className="text-center text-xs font-bold uppercase tracking-wider text-slate-300">
+                Sin jugadores vinculados: puedes jugar en modo local
+              </p>
+            ) : null}
           </div>
         </PanelCard>
 
