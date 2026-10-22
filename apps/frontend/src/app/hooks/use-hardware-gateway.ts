@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
-import { acquireHardwareGateway, releaseHardwareGateway } from '../hardware/gateway-client';
+import {
+  acquireHardwareGateway,
+  installKeyboardDigitBridge,
+  releaseHardwareGateway,
+} from '../hardware/gateway-client';
 
 /**
  * Mantiene viva la conexión con el gateway de hardware (WebSocket /ws).
@@ -8,7 +12,9 @@ import { acquireHardwareGateway, releaseHardwareGateway } from '../hardware/gate
 export function useHardwareGateway(): void {
   useEffect(() => {
     acquireHardwareGateway();
+    const removeKeyboardBridge = installKeyboardDigitBridge();
     return () => {
+      removeKeyboardBridge();
       releaseHardwareGateway();
     };
   }, []);

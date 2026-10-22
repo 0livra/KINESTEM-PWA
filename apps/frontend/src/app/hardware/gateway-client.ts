@@ -1,6 +1,7 @@
-import type { ClientWebSocketMessage, ServerWebSocketMessage, MatchDto } from '@kinestem/shared-types';
+import type { ClientWebSocketMessage, ServerWebSocketMessage, MatchDto, StationMode } from '@kinestem/shared-types';
 import { useAppStore } from '../../store';
 import type { MatchParticipantLite } from '../../store/match.slice';
+import type { LedMatrixFace } from '../../store/hardware.slice';
 
 const store = () => useAppStore.getState();
 
@@ -76,11 +77,13 @@ export function validateIrPinDigits(): void {
   // Validación de PIN transferida 100% al hardware C++
 }
 
-export function announcePinAcceptedToGateway(): void {
-  const { pairingPin } = store();
-  if (pairingPin) {
-    sendGatewayCommand({ type: 'SUBMIT_PIN', pin: pairingPin });
-  }
+/**
+ * Cambia la fase del Arduino Maestro (`MODE:<modo>`). El lector RC522 solo lee una
+ * tarjeta por armado, así que cada espera de RFID debe enviar 'RFID' de nuevo.
+ * No reenviar SUBMIT_PIN tras STATUS:PIN_OK: SET_PIN regresa el firmware a la fase PIN.
+ */
+export function sendStationMode(mode: StationMode): boolean {
+  return sendGatewayCommand({ type: 'SET_MODE', mode });
 }
 
 /* ------------------------------------------------------------------ */
@@ -119,12 +122,23 @@ function notifyHardwareEventListeners(event: string, data: unknown): void {
 /* FASE 2: Escaneo RFID + bloqueo anti-duplicados + vinculo backend    */
 /* ------------------------------------------------------------------ */
 
+let rfidLinkInFlight = false;
+
 export async function processRfidUid(uid: string): Promise<void> {
   notifyRfidListeners(uid);
 
   const s = store();
   if (s.pairingPhase !== 'WAITING_RFID_SCAN' && s.pairingPhase !== 'RFID_DUPLICATED') return;
+  if (rfidLinkInFlight) return;
+  rfidLinkInFlight = true;
+  try {
+    await linkScannedRfid(uid);
+  } finally {
+    rfidLinkInFlight = false;
+  }
+}
 
+async function linkScannedRfid(uid: string): Promise<void> {
   const current = useAppStore.getState();
   const username = current.username ?? `JUGADOR ${uid.slice(-2).toUpperCase()}`;
   let userId = current.userId;
@@ -198,6 +212,35 @@ export function sendFaceCommand(face: string): boolean {
   return sendGatewayCommand({ type: 'SET_FACE', face });
 }
 
+/** Caras de la UI -> comando FACE del Maestro (el firmware no define 'idle'). */
+const PHYSICAL_FACE: Record<LedMatrixFace, string> = {
+  idle: 'waiting',
+  waiting: 'waiting',
+  happy: 'happy',
+  confused: 'confused',
+  error: 'error',
+  cheer: 'cheer',
+};
+
+let unsubscribeMatrixMirror: (() => void) | null = null;
+
+/**
+ * Refleja ledMatrixFace del store en la matriz 8x8 del Arduino Esclavo
+ * (FACE:<cara> -> Maestro -> I2C 0x08), incluso cuando la fase avanza solo en la web.
+ */
+function installLedMatrixMirror(): void {
+  if (unsubscribeMatrixMirror) return;
+  unsubscribeMatrixMirror = useAppStore.subscribe((state, prev) => {
+    if (state.ledMatrixFace !== prev.ledMatrixFace) {
+      sendFaceCommand(PHYSICAL_FACE[state.ledMatrixFace]);
+    }
+  });
+}
+
+export function sendRgbCommand(r: number, g: number, b: number): boolean {
+  return sendGatewayCommand({ type: 'SET_RGB', r, g, b });
+}
+
 /* ------------------------------------------------------------------ */
 /* Dispatcher de mensajes del gateway                                  */
 /* ------------------------------------------------------------------ */
@@ -225,8 +268,9 @@ export function handleGatewayMessage(msg: ServerWebSocketMessage): void {
     }
 
     case 'AUTH_LINKED': {
+      // El gateway emite AUTH_LINKED junto con HARDWARE_EVENT RFID para la misma trama;
+      // la vinculación se procesa una sola vez desde HARDWARE_EVENT.
       s.setLastEvent('AUTH_LINKED', msg.uid);
-      void processRfidUid(String(msg.uid));
       break;
     }
 
@@ -234,9 +278,11 @@ export function handleGatewayMessage(msg: ServerWebSocketMessage): void {
       s.setLastEvent(msg.event, msg.data);
       notifyHardwareEventListeners(msg.event, msg.data);
       if (msg.event === 'RFID') {
-        void processRfidUid(String(msg.data));
+        void processRfidUid(String(msg.data).trim());
       } else if (msg.event === 'IR_DIGIT') {
         s.registerIrPulse(String(msg.data));
+      } else if (msg.event === 'IR_DETECTED') {
+        s.registerIrPulse();
       } else if (msg.event === 'PIN_VALIDATED') {
         s.setIrCodeStatus('correct');
       } else if (msg.event === 'PIN_ERROR') {
@@ -323,8 +369,15 @@ function connect(): void {
   };
 
   socket.onopen = () => {
-    useAppStore.getState().setWsStatus('connected');
+    const s = useAppStore.getState();
+    s.setWsStatus('connected');
     sendGatewayCommand({ type: 'GET_STATUS' });
+    // Reconexión WS (p. ej. reinicio del backend): resincroniza la fase activa del Maestro
+    if ((s.pairingPhase === 'WAITING_IR_CODE' || s.pairingPhase === 'IR_CODE_INCORRECT') && s.pairingPin) {
+      sendGatewayCommand({ type: 'SUBMIT_PIN', pin: s.pairingPin });
+    } else if (s.pairingPhase === 'WAITING_RFID_SCAN' || s.pairingPhase === 'RFID_DUPLICATED') {
+      sendStationMode('RFID');
+    }
   };
 
   socket.onclose = () => {
@@ -347,6 +400,7 @@ function scheduleReconnect(): void {
 
 export function acquireHardwareGateway(): void {
   refCount += 1;
+  installLedMatrixMirror();
   connect();
 }
 
@@ -359,8 +413,58 @@ export function releaseHardwareGateway(): void {
     }
     socket?.close();
     socket = null;
+    unsubscribeMatrixMirror?.();
+    unsubscribeMatrixMirror = null;
     useAppStore.getState().setWsStatus('disconnected');
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Teclado de la laptop como control IR                                */
+/* ------------------------------------------------------------------ */
+
+const KEYBOARD_GAME_PATHS = ['/lobby', '/arena'];
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+}
+
+function keyboardDigitsActive(): boolean {
+  const { pairingPhase } = store();
+  if (pairingPhase === 'WAITING_IR_CODE' || pairingPhase === 'IR_CODE_INCORRECT') return true;
+  return KEYBOARD_GAME_PATHS.includes(window.location.pathname);
+}
+
+/**
+ * Dígito ingresado desde la web (teclado o recuadro de captura). Se captura y valida en
+ * la web sin esperar eco del firmware; la LCD física solo refleja el progreso.
+ */
+export function submitManualDigit(digit: string): void {
+  if (!/^\d$/.test(digit)) return;
+  const s = store();
+  s.setLastEvent('IR_DIGIT', digit);
+  s.registerIrPulse(digit);
+  notifyHardwareEventListeners('IR_DIGIT', digit);
+
+  const after = store();
+  if (after.pairingPhase !== 'WAITING_IR_CODE') return;
+  if (after.irDigits.length === 4) {
+    after.setIrCodeStatus(after.irDigits.join('') === after.pairingPin ? 'correct' : 'incorrect');
+  } else {
+    sendLcdCommand(`PIN: ${after.pairingPin ?? '----'}`, '*'.repeat(after.irDigits.length));
+  }
+}
+
+export function installKeyboardDigitBridge(): () => void {
+  const onKeyDown = (ev: KeyboardEvent) => {
+    if (!/^\d$/.test(ev.key) || ev.repeat || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    if (isEditableTarget(ev.target) || !keyboardDigitsActive()) return;
+    ev.preventDefault();
+    submitManualDigit(ev.key);
+  };
+  window.addEventListener('keydown', onKeyDown);
+  return () => window.removeEventListener('keydown', onKeyDown);
 }
 
 /* ------------------------------------------------------------------ */
