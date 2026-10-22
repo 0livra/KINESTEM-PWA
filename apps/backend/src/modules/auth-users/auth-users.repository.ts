@@ -2,6 +2,9 @@ import { PoolClient } from 'pg';
 import { postgresService } from '../../config/postgres';
 import { UsuarioEntity, CreateUsuarioParams } from './auth-users.types';
 
+/** El control IR de la estación solo responde a la tecla 5. */
+export const FIXED_PAIRING_PIN = '5555';
+
 export interface IAuthUsersRepository {
   findById(userId: number): Promise<UsuarioEntity | null>;
   findByRfidUid(rfidUid: string): Promise<UsuarioEntity | null>;
@@ -53,7 +56,11 @@ export class AuthUsersRepository implements IAuthUsersRepository {
   }
 
   public async generatePin(userId: number): Promise<string> {
-    const pin = String(Math.floor(1000 + Math.random() * 9000));
+    const pin = FIXED_PAIRING_PIN;
+    // Con un PIN fijo, linkRfid (WHERE pin_temporal = $pin) solo debe encontrar a un usuario pendiente
+    await postgresService.query(
+      'UPDATE usuarios SET pin_temporal = NULL WHERE pin_temporal = $1 AND user_id <> $2', [pin, userId]
+    );
     await postgresService.query(
       'UPDATE usuarios SET pin_temporal = $1 WHERE user_id = $2', [pin, userId]
     );
