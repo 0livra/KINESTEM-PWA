@@ -10,6 +10,7 @@ export class SerialService extends EventEmitter {
   private activePort = env.SERIAL_PORT;
   private isReadyAfterDtr = false;
   private queuedCommands: string[] = [];
+  private isWriting = false;
   private dtrTimer: NodeJS.Timeout | null = null;
   private mockInterval: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -132,18 +133,13 @@ export class SerialService extends EventEmitter {
         this.isMock = false;
         console.log(`[SerialService] Puerto serial ${targetPort} abierto exitosamente.`);
 
-        // Tiempo de estabilización tras DTR (el Arduino Uno se reinicia al abrir la conexión serial ~1500ms)
+        // El Uno se reinicia por DTR al abrir el puerto: bootloader + setup() con beeps/LEDs
+        // tardan ~2.5s y el buffer RX del Arduino es de 64 bytes, así que la cola solo se libera
+        // al recibir "READY". El temporizador cubre placas que no se reinician al abrir el puerto.
         this.isReadyAfterDtr = false;
+        this.isWriting = false;
         if (this.dtrTimer) clearTimeout(this.dtrTimer);
-        this.dtrTimer = setTimeout(() => {
-          this.isReadyAfterDtr = true;
-          console.log(`[SerialService] Enlace DTR estabilizado en "${targetPort}". Listo para enviar tramas.`);
-          // Despachar comandos que hayan quedado en cola durante el reinicio
-          while (this.queuedCommands.length > 0) {
-            const nextCmd = this.queuedCommands.shift();
-            if (nextCmd) this.sendCommand(nextCmd);
-          }
-        }, 1800);
+        this.dtrTimer = setTimeout(() => this.markLinkReady('timeout'), 5000);
 
         this.emit('connected', this.getStatus());
         resolve();
@@ -192,7 +188,23 @@ export class SerialService extends EventEmitter {
     if (!parsed) return;
 
     console.log(`[Serial-IN] Trama: ${parsed.raw} -> Evento: ${parsed.event}`);
+    if (parsed.event === 'READY') this.markLinkReady('READY');
     this.emit('frame', parsed);
+  }
+
+  private markLinkReady(reason: 'READY' | 'timeout'): void {
+    if (this.dtrTimer) {
+      clearTimeout(this.dtrTimer);
+      this.dtrTimer = null;
+    }
+    if (this.isMock || this.isReadyAfterDtr || !this.isConnected) return;
+    this.isReadyAfterDtr = true;
+    const via = reason === 'READY' ? 'trama READY' : 'timeout sin READY';
+    console.log(
+      `[SerialService] Enlace DTR estabilizado en "${this.activePort}" (${via}). Listo para enviar tramas.` +
+        (this.queuedCommands.length > 0 ? ` Despachando ${this.queuedCommands.length} en cola.` : '')
+    );
+    this.pumpWrites();
   }
 
   public sendCommand(cmd: string): boolean {
@@ -203,30 +215,52 @@ export class SerialService extends EventEmitter {
       console.log(`[Serial-MOCK] Comando recibido hacia microcontrolador: "${cleanCmd}"`);
       if (cleanCmd === 'PING') {
         setTimeout(() => this.handleIncoming('PONG'), 50);
+      } else if (cleanCmd.startsWith('KEY:')) {
+        setTimeout(() => this.handleIncoming(`IR:${cleanCmd.slice(4)}`), 20);
       }
       return true;
     }
 
     if (!this.isConnected || !this.portInstance || !this.portInstance.isOpen) {
-      console.warn(`[Serial-OUT] Sin enlace activo en ${this.activePort}. Comando omitido: "${cleanCmd}"`);
+      console.warn(`[Serial-OUT] Sin enlace activo en ${this.activePort}. Trama omitida: ${cleanCmd}`);
       return false;
     }
 
-    // Si aún está en la ventana de reinicio por DTR tras abrir el puerto, encolar para no perder la trama
+    this.queuedCommands.push(cleanCmd);
     if (!this.isReadyAfterDtr) {
-      console.log(`[Serial-OUT] Esperando estabilización DTR en ${this.activePort}. Encolando: "${cleanCmd}"`);
-      this.queuedCommands.push(cleanCmd);
+      console.log(`[Serial-OUT] Esperando READY/DTR en ${this.activePort}. Encolando: ${cleanCmd}`);
       return true;
     }
-
-    this.portInstance.write(`${cleanCmd}\n`, 'utf8', (err: Error | null) => {
-      if (err) {
-        console.error(`[Serial-OUT] Error al enviar comando a ${this.activePort}: ${err.message}`);
-      } else {
-        console.log(`[Serial-OUT] Comando enviado a ${this.activePort}: "${cleanCmd}"`);
-      }
-    });
+    this.pumpWrites();
     return true;
+  }
+
+  /**
+   * Escribe una trama a la vez: el loop() del Arduino consume una línea por iteración
+   * y su buffer RX es de 64 bytes, así que ráfagas de LCD/FACE se espacian.
+   */
+  private pumpWrites(): void {
+    if (this.isWriting || !this.isReadyAfterDtr || !this.portInstance?.isOpen) return;
+    const nextCmd = this.queuedCommands.shift();
+    if (!nextCmd) return;
+
+    this.isWriting = true;
+    const port = this.portInstance;
+    port.write(`${nextCmd}\n`, 'utf8', (err: Error | null) => {
+      if (err) {
+        console.error(`[Serial-OUT] Error al enviar trama a ${this.activePort}: ${err.message}`);
+        this.isWriting = false;
+        this.pumpWrites();
+        return;
+      }
+      console.log(`[Serial-OUT] Trama enviada: ${nextCmd}`);
+      port.drain(() => {
+        setTimeout(() => {
+          this.isWriting = false;
+          this.pumpWrites();
+        }, 40);
+      });
+    });
   }
 
   public injectMockFrame(frame: string): void {

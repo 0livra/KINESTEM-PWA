@@ -8,6 +8,8 @@ import { postgresService } from '../../config/postgres';
 export class HardwareGateway {
   private static instance: HardwareGateway | null = null;
   private wss: WebSocketServer | null = null;
+  /** Última trama que define la fase del Maestro; se reenvía si el Arduino se reinicia (READY). */
+  private stationPhaseCommand: string | null = null;
 
   private constructor(private readonly serial: SerialService = serialService) {
     this.setupSerialListeners();
@@ -82,8 +84,10 @@ export class HardwareGateway {
 
       case 'SUBMIT_PIN': {
         const pin = String(msg.pin).trim();
-        // El backend instruye al hardware el PIN objetivo
-        this.serial.sendCommand(HardwareProtocol.formatSetPinCommand(pin));
+        // El backend instruye al hardware el PIN objetivo (el Maestro vuelve a la fase PIN)
+        const cmd = HardwareProtocol.formatSetPinCommand(pin);
+        this.stationPhaseCommand = cmd;
+        this.serial.sendCommand(cmd);
 
         this.broadcast({
           type: 'AUTH_WAITING',
@@ -104,6 +108,25 @@ export class HardwareGateway {
       case 'SET_FACE': {
         const cmd = HardwareProtocol.formatFaceCommand(msg.face);
         this.serial.sendCommand(cmd);
+        break;
+      }
+
+      case 'SET_MODE': {
+        const cmd = HardwareProtocol.formatModeCommand(msg.mode);
+        this.stationPhaseCommand = msg.mode === 'IDLE' ? null : cmd;
+        this.serial.sendCommand(cmd);
+        ws.send(JSON.stringify({ type: 'COMMAND_ACK', command: cmd.trim(), timestamp: Date.now() }));
+        break;
+      }
+
+      case 'KEY_INPUT': {
+        const cmd = HardwareProtocol.formatKeyCommand(String(msg.digit));
+        if (cmd) this.serial.sendCommand(cmd);
+        break;
+      }
+
+      case 'SET_RGB': {
+        this.serial.sendCommand(HardwareProtocol.formatRgbCommand(msg.r, msg.g, msg.b));
         break;
       }
 
@@ -128,6 +151,8 @@ export class HardwareGateway {
 
   private setupSerialListeners(): void {
     this.serial.on('frame', async (frame: ParsedSerialFrame) => {
+      this.trackStationPhase(frame);
+
       // Reenviar a todos los clientes frontend conectados
       this.broadcast({
         type: 'HARDWARE_EVENT',
@@ -176,14 +201,50 @@ export class HardwareGateway {
     });
   }
 
+  /**
+   * Refleja las transiciones internas del firmware para poder restaurarlas
+   * si el Arduino se reinicia a mitad del flujo.
+   */
+  private trackStationPhase(frame: ParsedSerialFrame): void {
+    switch (frame.event) {
+      case 'READY':
+        if (this.stationPhaseCommand) {
+          console.log(`[HardwareGateway] Arduino reiniciado. Restaurando fase: ${this.stationPhaseCommand.trim()}`);
+          this.serial.sendCommand(this.stationPhaseCommand);
+        }
+        break;
+      case 'PIN_VALIDATED':
+        // El firmware pasa solo a STATE_WAITING_RFID tras STATUS:PIN_OK
+        this.stationPhaseCommand = HardwareProtocol.formatModeCommand('RFID');
+        break;
+      case 'RFID':
+        // Tras una lectura el firmware queda en STATE_VERIFIED (sin lecturas activas)
+        if (this.stationPhaseCommand === HardwareProtocol.formatModeCommand('RFID')) {
+          this.stationPhaseCommand = null;
+        }
+        break;
+    }
+  }
+
   public broadcast(message: ServerWebSocketMessage): void {
     if (!this.wss) return;
     const serialized = JSON.stringify(message);
+    let delivered = 0;
     this.wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(serialized);
+        delivered += 1;
       }
     });
+    const detail =
+      message.type === 'HARDWARE_EVENT' || message.type === 'SYSTEM_EVENT'
+        ? ` ${message.event}=${JSON.stringify(message.data)}`
+        : message.type === 'AUTH_LINKED'
+          ? ` uid=${message.uid}`
+          : message.type === 'AUTH_WAITING'
+            ? ` pin=${message.pin}`
+            : '';
+    console.log(`[HardwareGateway] WS -> ${delivered} cliente(s): ${message.type}${detail}`);
   }
 
   public close(): void {
