@@ -227,6 +227,15 @@ export interface DeviceDto {
   last_seen_at?: string | null;
 }
 
+/**
+ * Modo operativo del Arduino Maestro (comando serial `MODE:<modo>`).
+ *  - PIN:  receptor IR captura el PIN de vinculación (Fase 1)
+ *  - RFID: lector RC522 armado para una lectura (Fase 2 / confirmación de premio)
+ *  - GAME: receptor IR reenvía cada tecla como `IR:<d>` durante la actividad
+ *  - IDLE: sin lecturas activas
+ */
+export type StationMode = 'PIN' | 'RFID' | 'GAME' | 'IDLE';
+
 export interface HardwareEventPayload {
   event: string;
   data: string | number | Record<string, unknown>;
@@ -240,6 +249,10 @@ export type ClientWebSocketMessage =
   | { type: 'SUBMIT_PIN'; pin: string }
   | { type: 'SET_LCD'; line1: string; line2?: string }
   | { type: 'SET_FACE'; face: string }
+  | { type: 'SET_MODE'; mode: StationMode }
+  | { type: 'SET_RGB'; r: number; g: number; b: number }
+  /** Dígito tecleado en la web; el Maestro lo procesa igual que una tecla del control IR. */
+  | { type: 'KEY_INPUT'; digit: string }
   | { type: 'GET_STATUS' }
   | {
       type: 'PLAYER_ACTION';
