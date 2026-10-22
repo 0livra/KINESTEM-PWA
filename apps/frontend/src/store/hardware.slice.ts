@@ -138,14 +138,24 @@ export const createHardwareSlice: StateCreator<
   registerIrPulse: (digit) =>
     set(
       (state) => {
-        const nextDigits =
-          typeof digit === 'string' && digit.length === 1 && state.irDigits.length < 4
-            ? [...state.irDigits, digit]
-            : state.irDigits;
+        const isDigit = typeof digit === 'string' && /^\d$/.test(digit);
+        const capturing = state.pairingPhase === 'WAITING_IR_CODE' || state.pairingPhase === 'IR_CODE_INCORRECT';
+        if (!isDigit || !capturing) {
+          return { ...state, irPulseAt: Date.now() };
+        }
+        // El firmware reinicia la captura tras STATUS:PIN_ERROR; un nuevo dígito abre el reintento
+        const restart = state.pairingPhase === 'IR_CODE_INCORRECT' || state.irDigits.length >= 4;
         return {
           ...state,
+          pairingPhase: 'WAITING_IR_CODE',
           irPulseAt: Date.now(),
-          irDigits: nextDigits,
+          irDigits: restart ? [digit] : [...state.irDigits, digit],
+          ...(state.pairingPhase === 'IR_CODE_INCORRECT'
+            ? {
+                lcdMessage: { line1: `PIN: ${state.pairingPin ?? '----'}`, line2: 'USA CONTROL IR' },
+                ledMatrixFace: 'waiting' as const,
+              }
+            : {}),
         };
       },
       false,
@@ -156,6 +166,10 @@ export const createHardwareSlice: StateCreator<
   setIrCodeStatus: (status) =>
     set(
       (state) => {
+        // Veredictos tardíos (p. ej. tras "Saltar fase IR") no deben regresar el flujo a la Fase 1
+        if (state.pairingPhase !== 'WAITING_IR_CODE' && state.pairingPhase !== 'IR_CODE_INCORRECT') {
+          return state;
+        }
         if (status === 'correct') {
           return {
             ...state,
